@@ -1,0 +1,11 @@
+[project]
+name = "pyPodControl"
+version = "0.0a1"
+authors = [
+  { name="RaduTek", email="me@radutek.uk" },
+]
+description = "Python implementation of iPod Accessory Protocol"
+readme = "README.md"
+dependencies = [
+    "pyserial>=3.5"
+]
