@@ -9,3 +9,14 @@ readme = "README.md"
 dependencies = [
     "pyserial>=3.5"
 ]
+
+[project.urls]
+Homepage = "https://github.com/RaduTek/pyPodControl"
+Issues = "https://github.com/RaduTek/pyPodControl/issues"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[build]
+files = ["src/pypodcontrol/*"]
