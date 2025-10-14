@@ -5,8 +5,4 @@ iap = iAPClient("/dev/ttyUSB0")
 
 g = General(iap)
 
-g.identify(SimpleRemote)
-
-sr = SimpleRemote(iap)
-
-sr.press_button(sys.argv[1])
+g.identify(0x04)
