@@ -12,12 +12,14 @@ class iAPBase:
 
     port: Serial
 
-    def __init__(self, port: str | Serial, baudrate: int = 19200) -> None:
+    def __init__(
+        self, port: str | Serial, baudrate: int = 19200, timeout: int = 5000
+    ) -> None:
         """
         Create a new iAPBase instance, with the given serial port
         """
         if isinstance(port, str):
-            self.port = Serial(port, baudrate)
+            self.port = Serial(port, baudrate, timeout=timeout / 1000.0)
         else:
             self.port = port
 
@@ -38,6 +40,45 @@ class iAPBase:
         data = iAPBase.encode_command(lingo_id, command_id, command_data)
 
         self.send_packet(data)
+
+    def receive_packet(self) -> tuple[int, int, bytes]:
+        """"""
+
+        header = self.port.read(3)
+
+        if len(header) < 3:
+            raise TimeoutError("Failed to receive header in timeout period")
+
+        header_trim = header[0:2]
+
+        if header_trim != iAPBase.packet_header:
+            raise RuntimeError(
+                f"Invalid header, expected {iAPBase.packet_header}, but got {header_trim}"
+            )
+
+        # Length of payload + checksum
+        bytes_to_read = header[2] + 1
+
+        data = self.port.read(bytes_to_read)
+
+        if len(data) != bytes_to_read:
+            raise TimeoutError("Failed to receive packet data in timeout period")
+
+        payload = data[:-1]
+        expected_checksum = data[-1]
+
+        actual_checksum = iAPBase.get_checksum(payload)[0]
+
+        if actual_checksum != expected_checksum:
+            raise TimeoutError(
+                f"Bad checksum, expected {expected_checksum}, but got {actual_checksum}"
+            )
+
+        lingo_id = payload[0]
+        command_id = payload[1]
+        command_data = payload[2:]
+
+        return lingo_id, command_id, command_data
 
     @staticmethod
     def encode_byte(value: int, signed: bool = False) -> bytes:
