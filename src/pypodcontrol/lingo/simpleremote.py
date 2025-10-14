@@ -112,14 +112,25 @@ class SimpleRemote(Lingo):
         self.current_buttons.remove(button)
         self.update_buttons()
 
-    def press_button(self, button: str, duration: float = 0.1) -> None:
+    def press_button(
+        self,
+        button: str,
+        duration: float = 0.1,
+        repeat: int = 1,
+        repeat_delay: float = 0.1,
+    ) -> None:
         """
         Press a button
 
         - button: Button to press (check SimpleRemote.buttons for available buttons)
         - duration: Duration to hold the button down for
+        - repeat: Repeat button press
+        - repeat_delay: Time to wait between button presses
         """
 
-        self.hold_button(button)
-        sleep(duration)
-        self.release_button(button)
+        for i in range(repeat):
+            if i > 0:
+                sleep(repeat_delay)
+            self.hold_button(button)
+            sleep(duration)
+            self.release_button(button)
