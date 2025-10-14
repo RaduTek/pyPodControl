@@ -7,6 +7,9 @@ on:
 jobs:
     build-and-publish:
         runs-on: ubuntu-latest
+        environment: release
+        permissions:
+            id-token: write
 
         steps:
             - name: Checkout code
@@ -26,4 +29,4 @@ jobs:
                   python -m build
 
             - name: Publish package to PyPI
-              uses: pypa/gh-action-pypi-publish@v1.5.0
+              uses: pypa/gh-action-pypi-publish@release/v1
