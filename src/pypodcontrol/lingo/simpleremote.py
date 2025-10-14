@@ -1,5 +1,6 @@
 from .. import iAPBase
 from . import Lingo
+from time import sleep
 
 
 class SimpleRemote(Lingo):
@@ -111,8 +112,14 @@ class SimpleRemote(Lingo):
         self.current_buttons.remove(button)
         self.update_buttons()
 
-    def press_button(self, button: str) -> None:
-        """Press a button"""
+    def press_button(self, button: str, duration: float = 0.1) -> None:
+        """
+        Press a button
+
+        - button: Button to press (check SimpleRemote.buttons for available buttons)
+        - duration: Duration to hold the button down for
+        """
 
         self.hold_button(button)
+        sleep(duration)
         self.release_button(button)

@@ -1,24 +1,38 @@
 import sys
 from pypodcontrol import iAPClient, General, SimpleRemote
 
-if len(sys.argv) < 2:
-    print("Missing button argument")
-    print("Available buttons", SimpleRemote.buttons)
+
+def print_usage(msg: str = ""):
+    if len(msg) > 0:
+        print(msg)
+    print(f"usage: python3 {sys.argv[0]} button [duration]")
+    print("Available buttons:", ", ".join(SimpleRemote.buttons))
     exit(1)
 
-button = sys.argv[1]
 
-if button not in SimpleRemote.buttons:
-    print("Unknown button:", button)
-    print("Available buttons", SimpleRemote.buttons)
-    exit(1)
+def simple_remote_test():
+    if len(sys.argv) < 2:
+        return print_usage("Missing button argument")
 
-iap = iAPClient("/dev/ttyUSB0")
+    button = sys.argv[1]
 
-g = General(iap)
+    duration = 0.1
+    if len(sys.argv) >= 3:
+        duration = float(sys.argv[2])
 
-g.identify(SimpleRemote)
+    if button not in SimpleRemote.buttons:
+        return print_usage(f"Unknown button: {button}")
 
-sr = SimpleRemote(iap)
+    iap = iAPClient("/dev/ttyUSB0")
 
-sr.press_button(sys.argv[1])
+    g = General(iap)
+
+    g.identify(SimpleRemote)
+
+    sr = SimpleRemote(iap)
+
+    sr.press_button(button, duration)
+
+
+if __name__ == "__main__":
+    simple_remote_test()
