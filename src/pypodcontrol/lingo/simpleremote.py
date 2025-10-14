@@ -1,4 +1,4 @@
-from pypodcontrol.iapbase import iAPBase
+from .. import iAPBase
 from . import Lingo
 
 
@@ -9,7 +9,19 @@ class SimpleRemote(Lingo):
     Implements basic remote control of iPod (button presses)
     """
 
-    # Available buttons, sorted in order of the bitmask
+    lingo_id = 0x02
+
+    commands = {
+        "ContextButtonStatus": 0x00,
+        "ACK": 0x01,
+        "ImageButtonStatus": 0x02,
+        "VideoButtonStatus": 0x03,
+        "AudioButtonStatus": 0x04,
+        "RadioButtonStatus": 0x0D,
+        "CameraButtonStatus": 0x0E,
+    }
+    """Available commands"""
+
     buttons = [
         "play_pause",
         "volume_up",
@@ -24,6 +36,8 @@ class SimpleRemote(Lingo):
         "mute",
         "next_chapter",
         "previous_chapter",
+        "next_playlist",
+        "previous_playlist",
         "shuffle",
         "repeat",
         "power_on",
@@ -37,14 +51,15 @@ class SimpleRemote(Lingo):
         "down",
         "backlight_off",
     ]
+    """Available buttons, sorted in order of the bitmask"""
 
     current_buttons = set()
+    """Currently pressed buttons"""
 
     def __init__(self, iap: iAPBase) -> None:
         """Create a new instance of SimpleRemote"""
 
-        # 0x02 is the Lingo ID for SimpleRemote
-        super().__init__(iap, 0x02)
+        super().__init__(iap, SimpleRemote.lingo_id)
 
     @staticmethod
     def get_button_mask(button: str) -> int:
@@ -64,12 +79,14 @@ class SimpleRemote(Lingo):
         return mask.to_bytes(length, "little")
 
     def update_buttons(self) -> None:
+        """Update the buttons and send status to iPod"""
+
         mask = 0
 
         for button in self.current_buttons:
             mask |= SimpleRemote.get_button_mask(button)
 
-        self.send_command(0x00, SimpleRemote.encode_mask(mask))
+        self.send_command("ContextButtonStatus", SimpleRemote.encode_mask(mask))
 
     def get_button_state(self, button: str) -> bool:
         """Check if a button is pressed"""
