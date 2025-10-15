@@ -84,25 +84,25 @@ class iAPBase:
     def encode_byte(value: int, signed: bool = False) -> bytes:
         """Encode a byte (8 bits)"""
 
-        return value.to_bytes(1, signed=signed)
+        return value.to_bytes(length=1, byteorder="big", signed=signed)
 
     @staticmethod
     def encode_short(value: int, signed: bool = False) -> bytes:
         """Encode a short integer (16 bits)"""
 
-        return value.to_bytes(2, signed=signed)
+        return value.to_bytes(length=2, byteorder="big", signed=signed)
 
     @staticmethod
     def encode_int(value: int, signed: bool = False) -> bytes:
         """Encode a integer (32 bits)"""
 
-        return value.to_bytes(4, signed=signed)
+        return value.to_bytes(length=4, byteorder="big", signed=signed)
 
     @staticmethod
     def encode_long(value: int, signed: bool = False) -> bytes:
         """Encode a long integer (64 bits)"""
 
-        return value.to_bytes(8, signed=signed)
+        return value.to_bytes(length=8, byteorder="big", signed=signed)
 
     @staticmethod
     def get_checksum(bytes: bytes) -> bytes:
