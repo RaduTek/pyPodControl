@@ -74,7 +74,7 @@ class General(Lingo):
     def __init__(self, iap: iAPBase) -> None:
         """Create a new instance of General"""
 
-        super().__init__(iap, General.lingo_id)
+        super().__init__(iap)
 
     def identify(self, lingo: int | type | Lingo) -> None:
         """

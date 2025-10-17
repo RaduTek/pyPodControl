@@ -33,7 +33,9 @@ class iAPBase:
         if self.port.write(data) == None:
             raise RuntimeError("Packet data was not sent.")
 
-    def send_command(self, lingo_id: int, command_id: int, command_data: bytes) -> None:
+    def send_command(
+        self, lingo_id: int, command_id: int, command_data: bytes = b""
+    ) -> None:
         """
         Send a command to the iPod
         """

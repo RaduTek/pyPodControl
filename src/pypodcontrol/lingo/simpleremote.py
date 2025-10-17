@@ -60,7 +60,7 @@ class SimpleRemote(Lingo):
     def __init__(self, iap: iAPBase) -> None:
         """Create a new instance of SimpleRemote"""
 
-        super().__init__(iap, SimpleRemote.lingo_id)
+        super().__init__(iap)
 
     @staticmethod
     def get_button_mask(button: str) -> int:
