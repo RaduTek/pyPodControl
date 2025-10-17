@@ -1,4 +1,4 @@
-from .. import iAPBase
+from .. import iAPClient
 
 
 class Lingo:
@@ -10,12 +10,12 @@ class Lingo:
     Extend this class to implement different iAP Lingos
     """
 
-    iap: iAPBase
+    iap: iAPClient
     lingo_id: int
 
     commands: dict = {}
 
-    def __init__(self, iap: iAPBase) -> None:
+    def __init__(self, iap: iAPClient) -> None:
         """Create a new instace of Lingo"""
 
         self.iap = iap

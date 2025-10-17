@@ -1,4 +1,4 @@
-from .. import iAPBase
+from .. import iAPClient
 from . import Lingo
 from time import sleep
 
@@ -57,7 +57,7 @@ class SimpleRemote(Lingo):
     current_buttons = set()
     """Currently pressed buttons"""
 
-    def __init__(self, iap: iAPBase) -> None:
+    def __init__(self, iap: iAPClient) -> None:
         """Create a new instance of SimpleRemote"""
 
         super().__init__(iap)

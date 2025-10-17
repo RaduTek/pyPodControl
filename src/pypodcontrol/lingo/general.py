@@ -1,4 +1,4 @@
-from .. import iAPBase
+from .. import iAPClient
 from . import Lingo
 
 
@@ -71,7 +71,7 @@ class General(Lingo):
     }
     """Available commands"""
 
-    def __init__(self, iap: iAPBase) -> None:
+    def __init__(self, iap: iAPClient) -> None:
         """Create a new instance of General"""
 
         super().__init__(iap)
@@ -92,4 +92,4 @@ class General(Lingo):
         else:
             raise TypeError("lingo must be int, Lingo subclass, or Lingo instance")
 
-        self.send_command("Identify", iAPBase.encode_byte(lingo_id))
+        self.send_command("Identify", iAPClient.encode_byte(lingo_id))
