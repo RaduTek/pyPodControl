@@ -25,14 +25,18 @@ class Lingo:
 
         return self.commands[command]
 
-    def send_command(self, command: str, command_data: bytes = b"") -> None:
+    def send_command(
+        self, command: str, command_data: bytes = b"", extended: bool = False
+    ) -> None:
         """Send a command by name"""
 
         command_id = self.get_command_id(command)
 
-        self.iap.send_command(self.lingo_id, command_id, command_data)
+        self.iap.send_command(self.lingo_id, command_id, command_data, extended)
 
-    def send_command_id(self, command_id: int, command_data: bytes = b"") -> None:
+    def send_command_id(
+        self, command_id: int, command_data: bytes = b"", extended: bool = False
+    ) -> None:
         """Send a command by ID"""
 
-        self.iap.send_command(self.lingo_id, command_id, command_data)
+        self.iap.send_command(self.lingo_id, command_id, command_data, extended)

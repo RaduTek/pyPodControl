@@ -34,12 +34,16 @@ class iAPClient:
             raise RuntimeError("Packet data was not sent.")
 
     def send_command(
-        self, lingo_id: int, command_id: int, command_data: bytes = b""
+        self,
+        lingo_id: int,
+        command_id: int,
+        command_data: bytes = b"",
+        extended: bool = False,
     ) -> None:
         """
         Send a command to the iPod
         """
-        data = iAPClient.encode_command(lingo_id, command_id, command_data)
+        data = iAPClient.encode_command(lingo_id, command_id, command_data, extended)
 
         self.send_packet(data)
 
@@ -144,12 +148,19 @@ class iAPClient:
 
     @staticmethod
     def encode_command(
-        lingo_id: int, command_id: int, command_data: bytes = b""
+        lingo_id: int,
+        command_id: int,
+        command_data: bytes = b"",
+        extended: bool = False,
     ) -> bytes:
         """Encode a command packet"""
 
         lingo_id_b = iAPClient.encode_byte(lingo_id)
-        command_id_b = iAPClient.encode_byte(command_id)
+        command_id_b = (
+            iAPClient.encode_short(command_id)
+            if extended
+            else iAPClient.encode_byte(command_id)
+        )
 
         payload = lingo_id_b + command_id_b + command_data
 
