@@ -1,5 +1,6 @@
 import sys
 import tty
+import termios
 from pypodcontrol import iAPClient
 from pypodcontrol.lingo import General, SimpleRemote
 
@@ -47,7 +48,7 @@ def keyboard_remote():
 
     sr = SimpleRemote(iap)
 
-    tty.setcbreak(sys.stdin.fileno())
+    term_set = tty.setcbreak(sys.stdin.fileno())
 
     print("Press a key (h for help, q to quit)...", end="\r", flush=True)
 
@@ -70,6 +71,7 @@ def keyboard_remote():
         sr.press_button(button)
 
     print("\nBye, bye!")
+    termios.tcsetattr(sys.stdin.fileno(), termios.TCSAFLUSH, term_set)
 
 
 if __name__ == "__main__":
