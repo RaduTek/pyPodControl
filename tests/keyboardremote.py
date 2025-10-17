@@ -1,6 +1,7 @@
 import sys
 import tty
-from pypodcontrol import iAPClient, General, SimpleRemote
+from pypodcontrol import iAPClient
+from pypodcontrol.lingo import General, SimpleRemote
 
 keymap = {
     "z": "stop",

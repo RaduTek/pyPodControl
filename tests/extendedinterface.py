@@ -1,5 +1,6 @@
 import sys
-from pypodcontrol import iAPClient, General, SimpleRemote
+from pypodcontrol import iAPClient
+from pypodcontrol.lingo import General, SimpleRemote
 
 iap = iAPClient("/dev/ttyUSB0")
 
