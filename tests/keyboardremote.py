@@ -49,7 +49,7 @@ def keyboard_remote():
 
     tty.setcbreak(sys.stdin.fileno())
 
-    print("Press a key (h for help)...", end="\r", flush=True)
+    print("Press a key (h for help, q to quit)...", end="\r", flush=True)
 
     while True:
         key = sys.stdin.read(1)
@@ -58,6 +58,9 @@ def keyboard_remote():
             print_help()
             continue
 
+        if key == "q":
+            break
+
         if not key in keymap.keys():
             continue
 
@@ -65,6 +68,8 @@ def keyboard_remote():
 
         print("Press:", button, " " * 6, end="\r", flush=True)
         sr.press_button(button)
+
+    print("\nBye, bye!")
 
 
 if __name__ == "__main__":
