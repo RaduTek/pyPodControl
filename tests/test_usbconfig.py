@@ -42,6 +42,7 @@ class FakeUSBDevice:
         self.active = active
         self.kernel_drivers = {0}
         self.detached = []
+        self.disposed = False
 
     def __iter__(self):
         return iter(self.configs)
@@ -68,8 +69,12 @@ def fake_usb(monkeypatch):
     def find(find_all, idVendor, custom_match):
         return [d for d in devices if custom_match(d)]
 
+    def dispose_resources(device):
+        device.disposed = True
+
     core = SimpleNamespace(find=find, USBError=USBError, NoBackendError=NoBackendError)
-    monkeypatch.setattr(usbconfig, "_import_pyusb", lambda: core)
+    util = SimpleNamespace(dispose_resources=dispose_resources)
+    monkeypatch.setattr(usbconfig, "_import_pyusb", lambda: (core, util))
     monkeypatch.setattr(usbconfig, "is_mounted", lambda device: False)
     return devices
 
@@ -85,6 +90,8 @@ def test_switches_from_mass_storage(fake_usb):
     assert select_iui_configuration() == 0x1261
     assert ipod.active == 2
     assert ipod.detached == [0]
+    # The opened device handle is released after the switch
+    assert ipod.disposed
 
 
 def test_already_selected(fake_usb):

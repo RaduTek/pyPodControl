@@ -87,3 +87,25 @@ def test_receiver_errors_do_not_stop_reader():
         transport.inject(b"\x00\x08a")
         transport.inject(b"\x00\x08b")
         assert received.wait(1)
+
+
+def test_reader_closes_on_read_error():
+    import threading
+
+    closed = threading.Event()
+
+    class FailingTransport(FakeTransport):
+        def _read_chunk(self):
+            raise OSError("device disconnected")
+
+        def _close(self):
+            closed.set()
+
+    transport = FailingTransport()
+    transport.open()
+
+    # The reader hits the error, stops and releases the link on its own
+    assert closed.wait(1)
+    assert not transport.is_open
+
+    transport.close()  # idempotent, must not raise

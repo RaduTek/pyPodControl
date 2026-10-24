@@ -79,6 +79,8 @@ Alternatively, udev can always switch iPods to the iUI configuration as soon as 
 SUBSYSTEM=="usb", ATTR{idVendor}=="05ac", ATTR{idProduct}=="12??", ATTR{bConfigurationValue}="2"
 ```
 
+Letting udev do the switch also sidesteps `pyusb`/`libusb` entirely, so `USBHIDTransport(select_configuration=False)` is enough and only `hidapi` is used.
+
 See the `examples/` directory for complete scripts.
 
 ## Development

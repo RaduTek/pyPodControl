@@ -110,8 +110,11 @@ class Transport(ABC):
                 chunk = self._read_chunk()
             except Exception:
                 if self._running.is_set():
+                    # The link failed on its own (e.g. the iPod was unplugged);
+                    # release it so the handle does not linger until close()
                     logger.exception("Transport read failed, stopping reader")
                     self._running.clear()
+                    self._safe_close()
                 break
 
             if not chunk:
@@ -119,6 +122,14 @@ class Transport(ABC):
 
             for payload in self.parser.feed(chunk):
                 self._deliver(payload)
+
+    def _safe_close(self) -> None:
+        """Close the underlying link, ignoring errors"""
+
+        try:
+            self._close()
+        except Exception:
+            logger.debug("Error closing transport", exc_info=True)
 
     def _deliver(self, payload: bytes) -> None:
         """Pass a received payload to the receiver"""

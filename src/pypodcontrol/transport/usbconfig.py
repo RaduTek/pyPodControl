@@ -20,12 +20,13 @@ def is_apple_mobile_device(product_id: int) -> bool:
 def _import_pyusb():
     try:
         import usb.core
+        import usb.util
     except ImportError:
         raise TransportError(
             "Selecting the USB configuration requires pyusb: pip install pyPodControl[usb]"
         ) from None
 
-    return usb.core
+    return usb.core, usb.util
 
 
 def find_iui_configuration(device) -> int | None:
@@ -147,7 +148,7 @@ def select_iui_configuration(
     Returns the product ID of the selected device.
     """
 
-    core = _import_pyusb()
+    core, util = _import_pyusb()
 
     def match(device) -> bool:
         if product_id is not None:
@@ -161,38 +162,51 @@ def select_iui_configuration(
     except core.NoBackendError as e:
         raise TransportError(f"No libusb backend available for pyusb: {e}") from e
 
-    for device in devices:
-        try:
-            config_value = find_iui_configuration(device)
-        except core.USBError as e:
-            logger.debug("Skipping %04x:%04x: %s", vendor_id, device.idProduct, e)
-            continue
+    # Every device whose descriptors are read opens a libusb handle; all of them
+    # must be released before returning. A handle left open (with a detached
+    # kernel driver) wedges the host USB stack when the iPod is unplugged, so
+    # hidapi reopens the device fresh after the switch rather than reusing this.
+    try:
+        for device in devices:
+            try:
+                config_value = find_iui_configuration(device)
+            except core.USBError as e:
+                logger.debug("Skipping %04x:%04x: %s", vendor_id, device.idProduct, e)
+                continue
 
-        if config_value is None:
-            continue
+            if config_value is None:
+                continue
 
-        current = _active_configuration(device)
+            current = _active_configuration(device)
 
-        if current == config_value:
-            logger.debug("iUI configuration %d already selected", config_value)
+            if current == config_value:
+                logger.debug("iUI configuration %d already selected", config_value)
+                return device.idProduct
+
+            if check_mounted and is_mounted(device):
+                raise TransportError(
+                    "The iPod's disk is mounted, eject it before switching to the iPod USB Interface"
+                )
+
+            logger.info("Selecting iUI configuration %d", config_value)
+
+            try:
+                _detach_kernel_drivers(device, current)
+                device.set_configuration(config_value)
+            except core.USBError as e:
+                raise TransportError(
+                    f"Failed to select USB configuration {config_value}: {e} "
+                    "(root or a udev rule granting access to the device is needed)"
+                ) from e
+
             return device.idProduct
 
-        if check_mounted and is_mounted(device):
-            raise TransportError(
-                "The iPod's disk is mounted, eject it before switching to the iPod USB Interface"
-            )
-
-        logger.info("Selecting iUI configuration %d", config_value)
-
-        try:
-            _detach_kernel_drivers(device, current)
-            device.set_configuration(config_value)
-        except core.USBError as e:
-            raise TransportError(
-                f"Failed to select USB configuration {config_value}: {e} "
-                "(root or a udev rule granting access to the device is needed)"
-            ) from e
-
-        return device.idProduct
-
-    raise TransportError("No iPod with an iPod USB Interface configuration found")
+        raise TransportError("No iPod with an iPod USB Interface configuration found")
+    finally:
+        # libusb issues the SET_CONFIGURATION request on the wire, so closing the
+        # handle here keeps the iPod in its new configuration
+        for device in devices:
+            try:
+                util.dispose_resources(device)
+            except Exception:
+                logger.debug("Failed to release USB device", exc_info=True)
