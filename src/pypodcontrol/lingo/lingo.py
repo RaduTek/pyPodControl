@@ -1,3 +1,5 @@
+from typing import ClassVar
+
 from .. import iAPClient
 
 
@@ -11,7 +13,7 @@ class Lingo:
     """
 
     iap: iAPClient
-    lingo_id: int
+    LINGO_ID: ClassVar[int]
 
     commands: dict = {}
 
@@ -32,11 +34,11 @@ class Lingo:
 
         command_id = self.get_command_id(command)
 
-        self.iap.send_command(self.lingo_id, command_id, command_data, extended)
+        self.iap.send_command(self.LINGO_ID, command_id, command_data, extended)
 
     def send_command_id(
         self, command_id: int, command_data: bytes = b"", extended: bool = False
     ) -> None:
         """Send a command by ID"""
 
-        self.iap.send_command(self.lingo_id, command_id, command_data, extended)
+        self.iap.send_command(self.LINGO_ID, command_id, command_data, extended)

@@ -1,3 +1,5 @@
+from typing import Final
+
 from .. import iAPClient
 from . import Lingo
 
@@ -9,7 +11,7 @@ class ExtendedInterface(Lingo):
     Request high power use from iPod
     """
 
-    lingo_id = 0x04
+    LINGO_ID: Final = 0x04
 
     commands = {
         "ACK": 0x0001,

@@ -1,3 +1,5 @@
+from typing import Final
+
 from .. import iAPClient
 from . import Lingo
 
@@ -9,7 +11,7 @@ class AccessoryPower(Lingo):
     Request high power use from iPod
     """
 
-    lingo_id = 0x05
+    LINGO_ID: Final = 0x05
 
     commands = {
         "BeginHighPower": 0x02,

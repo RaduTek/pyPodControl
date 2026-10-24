@@ -1,3 +1,5 @@
+from typing import Final
+
 from .. import iAPClient
 from . import Lingo
 from time import sleep
@@ -10,7 +12,7 @@ class SimpleRemote(Lingo):
     Implements basic remote control of iPod (button presses)
     """
 
-    lingo_id = 0x02
+    LINGO_ID: Final = 0x02
 
     commands = {
         "ContextButtonStatus": 0x00,

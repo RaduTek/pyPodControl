@@ -1,3 +1,5 @@
+from typing import Final
+
 from .. import iAPClient
 from . import Lingo
 
@@ -9,7 +11,7 @@ class General(Lingo):
     Implements housekeeping commands supported by all iPods
     """
 
-    lingo_id = 0x00
+    LINGO_ID: Final = 0x00
 
     commands = {
         "RequestIdentify": 0x0,
@@ -86,9 +88,9 @@ class General(Lingo):
         if isinstance(lingo, int):
             lingo_id = lingo
         elif isinstance(lingo, type) and issubclass(lingo, Lingo):
-            lingo_id = getattr(lingo, "lingo_id")
+            lingo_id = lingo.LINGO_ID
         elif isinstance(lingo, Lingo):
-            lingo_id = getattr(lingo, "lingo_id")
+            lingo_id = lingo.LINGO_ID
         else:
             raise TypeError("lingo must be int, Lingo subclass, or Lingo instance")
 
