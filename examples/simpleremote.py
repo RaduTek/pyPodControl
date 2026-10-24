@@ -1,41 +1,41 @@
-import sys
+import argparse
+
+from common import add_transport_args, make_transport
 from pypodcontrol import iAPClient
 from pypodcontrol.lingo import SimpleRemote
-from pypodcontrol.transport import UARTTransport
-
-
-def print_usage(msg: str = ""):
-    if len(msg) > 0:
-        print(msg)
-    print(f"usage: python3 {sys.argv[0]} button [duration] [repeat]")
-    print("Available buttons:", ", ".join(SimpleRemote.buttons))
-    exit(1)
 
 
 def simple_remote_test():
-    if len(sys.argv) < 2:
-        return print_usage("Missing button argument")
+    parser = argparse.ArgumentParser(description="Press a button on the iPod")
+    parser.add_argument(
+        "button",
+        choices=SimpleRemote.buttons,
+        metavar="button",
+        help="Button to press: " + ", ".join(SimpleRemote.buttons),
+    )
+    parser.add_argument(
+        "duration",
+        type=float,
+        nargs="?",
+        default=0.1,
+        help="Time to hold the button, in seconds (default: %(default)s)",
+    )
+    parser.add_argument(
+        "repeat",
+        type=int,
+        nargs="?",
+        default=1,
+        help="Number of button presses (default: %(default)s)",
+    )
+    add_transport_args(parser)
+    args = parser.parse_args()
 
-    button = sys.argv[1]
-
-    duration = 0.1
-    if len(sys.argv) >= 3:
-        duration = float(sys.argv[2])
-
-    repeat = 1
-
-    if len(sys.argv) >= 4:
-        repeat = int(sys.argv[3])
-
-    if button not in SimpleRemote.buttons:
-        return print_usage(f"Unknown button: {button}")
-
-    with iAPClient(UARTTransport("/dev/ttyUSB0")) as iap:
+    with iAPClient(make_transport(args)) as iap:
         sr = iap.register(SimpleRemote())
 
         iap.general.identify(sr)
 
-        sr.press_button(button, duration, repeat)
+        sr.press_button(args.button, args.duration, args.repeat)
 
 
 if __name__ == "__main__":

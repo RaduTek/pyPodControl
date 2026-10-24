@@ -1,9 +1,11 @@
+import argparse
 import sys
 import tty
 import termios
+
+from common import add_transport_args, make_transport
 from pypodcontrol import iAPClient
 from pypodcontrol.lingo import SimpleRemote
-from pypodcontrol.transport import UARTTransport
 
 keymap = {
     "z": "stop",
@@ -41,39 +43,41 @@ def print_help():
 
 
 def keyboard_remote():
-    iap = iAPClient(UARTTransport("/dev/ttyUSB0"))
-    iap.open()
+    parser = argparse.ArgumentParser(description="Control the iPod with the keyboard")
+    add_transport_args(parser)
+    args = parser.parse_args()
 
-    sr = iap.register(SimpleRemote())
+    with iAPClient(make_transport(args)) as iap:
+        sr = iap.register(SimpleRemote())
 
-    iap.general.identify(sr)
+        iap.general.identify(sr)
 
-    term_set = tty.setcbreak(sys.stdin.fileno())
+        term_set = tty.setcbreak(sys.stdin.fileno())
 
-    print("Press a key (h for help, q to quit)...", end="\r", flush=True)
+        try:
+            print("Press a key (h for help, q to quit)...", end="\r", flush=True)
 
-    while True:
-        key = sys.stdin.read(1)
+            while True:
+                key = sys.stdin.read(1)
 
-        if key == "h":
-            print_help()
-            continue
+                if key == "h":
+                    print_help()
+                    continue
 
-        if key == "q":
-            break
+                if key == "q":
+                    break
 
-        if not key in keymap.keys():
-            continue
+                if not key in keymap.keys():
+                    continue
 
-        button = keymap[key]
+                button = keymap[key]
 
-        print("Press:", button, " " * 6, end="\r", flush=True)
-        sr.press_button(button)
-
-    iap.close()
+                print("Press:", button, " " * 6, end="\r", flush=True)
+                sr.press_button(button)
+        finally:
+            termios.tcsetattr(sys.stdin.fileno(), termios.TCSAFLUSH, term_set)
 
     print("\nBye, bye!")
-    termios.tcsetattr(sys.stdin.fileno(), termios.TCSAFLUSH, term_set)
 
 
 if __name__ == "__main__":
