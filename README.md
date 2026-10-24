@@ -33,6 +33,24 @@ with iAPClient(UARTTransport("/dev/ttyUSB0")) as iap:
     -   `power_options` declares how much power the accessory draws from the iPod (`PowerOption.LOW_POWER`, `INTERMITTENT_HIGH_POWER` or `CONSTANT_HIGH_POWER`).
 -   Pass `use_idps=True` together with an `AuthenticationProvider` to identify using IDPS instead. This enables transaction IDs and sends the accessory information given as `accessory_info=AccessoryInfo(...)`. iPods that don't support IDPS fall back to `IdentifyDeviceLingoes`.
 
+### Authentication
+
+Authenticated lingoes and commands require Made-for-iPod authentication, which normally needs an Apple authentication coprocessor. iPods running firmware that bypasses the signature check (such as [RepriseOS](https://github.com/RaduTek/repriseos-lab) on the iPod Classic) accept any signature, so `BypassedAuthenticationProvider` can authenticate without a coprocessor:
+
+```python
+from pypodcontrol import iAPClient
+from pypodcontrol.auth import BypassedAuthenticationProvider
+from pypodcontrol.transport import UARTTransport
+
+auth = BypassedAuthenticationProvider()  # device_id defaults to 0x200
+with iAPClient(UARTTransport("/dev/ttyUSB0"), auth=auth) as iap:
+    iap.start_identify()  # authenticates because a provider is set
+```
+
+The iPod still performs a genuine certificate check, so a real Apple X.509 certificate is required. One captured from a successful authentication ships with the library (`pypodcontrol/auth/apple_auth_cert.bin`) and is used by default; pass a different path to the constructor to override it. This only works on a patched iPod; a stock iPod rejects the mock signature.
+
+The examples accept `--auth` to authenticate this way.
+
 ### Transports
 
 -   `UARTTransport(port, baudrate=19200)`: serial UART on the 30 pin connector

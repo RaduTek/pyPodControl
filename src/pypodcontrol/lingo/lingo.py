@@ -115,7 +115,7 @@ class Lingo:
         command: str | int,
         data: bytes = b"",
         *,
-        transaction_id: bool | None = None,
+        transaction_id: bool | int | None = None,
     ) -> Packet:
         """
         Send a command without waiting for a response
@@ -123,6 +123,7 @@ class Lingo:
         - command: Command name or ID
         - data: Command parameters
         - transaction_id: Override whether a transaction ID is included
+          (True/False), or an explicit ID to send
         """
 
         return self.iap.send_packet(

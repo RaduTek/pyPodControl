@@ -78,15 +78,27 @@ class FakeiPod:
         identify_status: int = 0x00,
         max_payload: int | None = 500,
         token_status: dict[int, int] | None = None,
+        drive_auth: bool = True,
+        auth_status: int = 0x00,
     ) -> None:
         self.transport = transport
         self.idps = idps
         self.identify_status = identify_status
         self.max_payload = max_payload
         self.token_status = token_status or {}
+        self.drive_auth = drive_auth
+        self.auth_status = auth_status
         self.received: list[bytes] = []
         self.tokens: list[bytes] = []
+        self.certificate = bytearray()
+        self.signature: bytes | None = None
+        self.tid_enabled = False
         transport.on_send = self.on_send
+
+    @property
+    def auth_tid(self) -> int | None:
+        # During auth the iPod reuses a single transaction ID
+        return 0x00 if self.tid_enabled else None
 
     def reply(self, command: int, data: bytes, transaction_id: int | None) -> None:
         self.transport.inject(Packet(0x00, command, data, transaction_id).to_payload())
@@ -94,12 +106,20 @@ class FakeiPod:
     def ack(self, status: int, command: int, transaction_id: int | None) -> None:
         self.reply(0x02, bytes([status, command]), transaction_id)
 
+    def start_authentication(self) -> None:
+        if self.drive_auth:
+            self.reply(0x14, b"", self.auth_tid)  # GetDevAuthenticationInfo
+
     def on_send(self, payload: bytes) -> None:
         self.received.append(payload)
         command = payload[1]
 
         if command == 0x13:
             self.ack(self.identify_status, command, None)
+            if self.identify_status == 0x00:
+                options = int.from_bytes(payload[6:10], "big")
+                if options & 0b10:  # authenticate immediately
+                    self.start_authentication()
             return
 
         if command == 0x38 and not self.idps:
@@ -107,7 +127,11 @@ class FakeiPod:
             self.ack(0x04, command, None)
             return
 
-        packet = Packet.from_payload(payload, has_transaction_id=True)
+        if command == 0x38:
+            # StartIDPS and every command after it carries a transaction ID
+            self.tid_enabled = True
+
+        packet = Packet.from_payload(payload, has_transaction_id=self.tid_enabled)
         tid = packet.transaction_id
 
         if command == 0x38:
@@ -132,6 +156,19 @@ class FakeiPod:
         elif command == 0x3B:
             if packet.data[0] == 0:
                 self.reply(0x3C, b"\x00", tid)
+                self.start_authentication()
+        elif command == 0x15:  # RetDevAuthenticationInfo
+            index, maximum = packet.data[2], packet.data[3]
+            self.certificate += packet.data[4:]
+            if index < maximum:
+                self.ack(0x00, command, tid)  # acknowledge intermediate section
+            else:
+                self.reply(0x16, b"\x00", tid)  # AckDevAuthenticationInfo
+                # GetDevAuthenticationSignature: 20 byte challenge + retry counter
+                self.reply(0x17, bytes(range(20)) + b"\x01", self.auth_tid)
+        elif command == 0x18:  # RetDevAuthenticationSignature
+            self.signature = packet.data
+            self.reply(0x19, bytes([self.auth_status]), self.auth_tid)
 
 
 @pytest.fixture
@@ -166,10 +203,12 @@ def test_idps_flow():
         assert transport.max_payload_size == 500
 
     commands = [p[1] for p in ipod.received]
-    assert commands == [0x38, 0x11, 0x39, 0x3B]
+    # IDPS, then the device authentication handshake
+    assert commands == [0x38, 0x11, 0x39, 0x3B, 0x15, 0x18]
 
-    # Transaction IDs count up from 0
-    assert [int.from_bytes(p[2:4], "big") for p in ipod.received] == [0, 1, 2, 3]
+    # The identification commands count transaction IDs up from 0
+    assert [int.from_bytes(p[2:4], "big") for p in ipod.received[:4]] == [0, 1, 2, 3]
+    assert ipod.signature is not None
 
     # IdentifyToken first: lingoes 0x00 + 0x02, options, device ID
     assert ipod.tokens[0] == bytes.fromhex("0D 00 00 02 00 02 00 00 00 06 00 00 02 00")
@@ -179,7 +218,8 @@ def test_idps_flow():
     info_types = [t[3] for t in ipod.tokens if t[2] == 0x02]
     assert info_types == [0x01, 0x04, 0x05, 0x06, 0x07, 0x08, 0x0C]
 
-    assert ipod.received[-1][4:] == b"\x00"
+    # EndIDPS (the 4th command) carries accEndIDPSStatus 0 (finish, authenticate)
+    assert ipod.received[3][1] == 0x3B and ipod.received[3][4:] == b"\x00"
 
 
 def test_idps_tokens_split_by_max_payload():
@@ -216,7 +256,7 @@ def test_idps_falls_back_to_identify_device_lingoes():
         assert iap.is_identified
         assert not iap.transaction_ids_enabled
 
-    assert [p[1] for p in ipod.received] == [0x38, 0x13]
+    assert [p[1] for p in ipod.received] == [0x38, 0x13, 0x15, 0x18]
     assert ipod.received[1] == bytes.fromhex(
         "00 13" "00 00 00 05" "00 00 00 02" "00 00 02 00"
     )

@@ -192,9 +192,41 @@ class General(Lingo):
     ACCESSORY_INFO_RF_CERTIFICATIONS: Final = 0x0C
     """AccessoryInfoToken info types"""
 
+    MAX_CERT_SECTION: Final = 500
+    """Maximum certificate bytes per RetDevAuthenticationInfo section"""
+
+    AUTH_SUCCESS: Final = 0x00
+    """AckDevAuthenticationStatus status: authenticated"""
+
+    def __init__(self) -> None:
+        super().__init__()
+
+        self._auth_lock = threading.Lock()
+        self._auth_event = threading.Event()
+        self._auth_status: int | None = None
+        self._cert_ack = threading.Event()
+        self._cert_ack_status = 0x00
+
     def handle_packet(self, packet: Packet) -> None:
-        if packet.command_id == self.command_id("RequestIdentify"):
+        command_id = packet.command_id
+
+        if command_id == self.command_id("RequestIdentify"):
             self._on_request_identify()
+        elif command_id == self.command_id("GetDevAuthenticationInfo"):
+            self._on_get_dev_authentication_info(packet.transaction_id)
+        elif command_id == self.command_id("GetDevAuthenticationSignature"):
+            self._on_get_dev_authentication_signature(packet)
+        elif command_id == self.command_id("AckDevAuthenticationInfo"):
+            self._on_cert_ack(packet.data[0] if packet.data else 0x00)
+        elif command_id == self.command_id("AckDevAuthenticationStatus"):
+            self._on_authentication_status(packet.data)
+        else:
+            # An iPodAck of a certificate section releases the next section
+            ack = self.parse_ack(packet)
+            if ack is not None and ack[1] == self.command_id(
+                "RetDevAuthenticationInfo"
+            ):
+                self._on_cert_ack(ack[0])
 
         super().handle_packet(packet)
 
@@ -210,6 +242,131 @@ class General(Lingo):
         threading.Thread(
             target=self.iap.reidentify, name="iAP-reidentify", daemon=True
         ).start()
+
+    # --- device authentication ------------------------------------------------
+    #
+    # The iPod drives authentication: it asks for the accessory's certificate
+    # (GetDevAuthenticationInfo) and a signed challenge (GetDevAuthenticationSignature),
+    # verifies them and reports the result (AckDevAuthenticationStatus). The
+    # AuthenticationProvider supplies the certificate and signature.
+
+    def reset_authentication(self) -> None:
+        """Clear the authentication result before a new identification"""
+
+        with self._auth_lock:
+            self._auth_status = None
+            self._auth_event.clear()
+
+    @property
+    def authentication_status(self) -> int | None:
+        """Last AckDevAuthenticationStatus status, None if not authenticated yet"""
+
+        return self._auth_status
+
+    def wait_for_authentication(self, timeout: float | None = None) -> bool:
+        """Wait for authentication to finish, returns whether it passed"""
+
+        if not self._auth_event.wait(timeout):
+            return False
+
+        return self._auth_status == self.AUTH_SUCCESS
+
+    def _on_get_dev_authentication_info(self, transaction_id: int | None) -> None:
+        """The iPod requests the accessory certificate"""
+
+        if self.iap.auth is None:
+            logger.warning("iPod requested authentication but no provider is set")
+            return
+
+        # Sending the certificate waits for ACKs between sections, so it must
+        # not run on the reader thread that delivers those ACKs
+        threading.Thread(
+            target=self._send_dev_authentication_info,
+            args=(transaction_id,),
+            name="iAP-auth-cert",
+            daemon=True,
+        ).start()
+
+    def _send_dev_authentication_info(self, transaction_id: int | None) -> None:
+        auth = self.iap.auth
+        if auth is None:
+            return
+
+        certificate = auth.get_certificate()
+        major, minor = auth.protocol_version
+
+        # A section must fit both the 500 byte cert limit and the transport's
+        # packet payload (lingo, command, transaction ID and the 4 byte header)
+        overhead = 2 + (2 if self.iap.transaction_ids_enabled else 0) + 4
+        section_size = min(self.MAX_CERT_SECTION, self.iap.transport.max_payload_size - overhead)
+
+        sections = [
+            certificate[i : i + section_size]
+            for i in range(0, len(certificate), section_size)
+        ] or [b""]
+        last = len(sections) - 1
+
+        logger.info(
+            "Sending authentication certificate: %d bytes in %d section(s)",
+            len(certificate),
+            len(sections),
+        )
+
+        echo = transaction_id if transaction_id is not None else False
+
+        for index, section in enumerate(sections):
+            header = bytes([major, minor, index, last])
+
+            self._cert_ack.clear()
+            self.send(
+                "RetDevAuthenticationInfo", header + section, transaction_id=echo
+            )
+
+            # Every section but the last is acknowledged before the next is sent
+            if index == last:
+                break
+
+            if not self._cert_ack.wait(self.iap.timeout):
+                logger.warning("No acknowledgment for certificate section %d", index)
+                return
+            if self._cert_ack_status != 0x00:
+                logger.warning(
+                    "Certificate section %d rejected: status 0x%02X",
+                    index,
+                    self._cert_ack_status,
+                )
+                return
+
+    def _on_cert_ack(self, status: int) -> None:
+        self._cert_ack_status = status
+        self._cert_ack.set()
+
+    def _on_get_dev_authentication_signature(self, packet: Packet) -> None:
+        """The iPod sends a challenge for the accessory to sign"""
+
+        auth = self.iap.auth
+        if auth is None:
+            logger.warning("iPod requested a signature but no provider is set")
+            return
+
+        # The payload is the challenge followed by a 1 byte retry counter
+        challenge = packet.data[:-1] if packet.data else b""
+        signature = auth.sign_challenge(challenge)
+
+        echo = packet.transaction_id if packet.transaction_id is not None else False
+        self.send("RetDevAuthenticationSignature", signature, transaction_id=echo)
+
+    def _on_authentication_status(self, data: bytes) -> None:
+        status = data[0] if data else 0xFF
+
+        with self._auth_lock:
+            self._auth_status = status
+            self._auth_event.set()
+
+        if status == self.AUTH_SUCCESS:
+            logger.info("Authentication passed")
+        else:
+            logger.warning("Authentication failed: status 0x%02X", status)
 
     @staticmethod
     def identify_options(

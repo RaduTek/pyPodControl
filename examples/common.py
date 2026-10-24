@@ -1,6 +1,7 @@
 import argparse
 import logging
 
+from pypodcontrol.auth import AuthenticationProvider, BypassedAuthenticationProvider
 from pypodcontrol.transport import Transport, UARTTransport
 
 
@@ -10,6 +11,11 @@ def add_transport_args(parser: argparse.ArgumentParser) -> None:
     group = parser.add_argument_group("transport")
     group.add_argument(
         "--usb", action="store_true", help="Use USB HID transport instead of UART"
+    )
+    group.add_argument(
+        "--auth",
+        action="store_true",
+        help="Authenticate using the bypass provider (needs a patched iPod)",
     )
     group.add_argument(
         "--port", default="/dev/ttyUSB0", help="UART serial port (default: %(default)s)"
@@ -40,3 +46,9 @@ def make_transport(args: argparse.Namespace) -> Transport:
         return USBHIDTransport(select_configuration=args.select_configuration)
 
     return UARTTransport(args.port, args.baudrate)
+
+
+def make_auth(args: argparse.Namespace) -> AuthenticationProvider | None:
+    """Create the authentication provider selected by the arguments"""
+
+    return BypassedAuthenticationProvider() if args.auth else None

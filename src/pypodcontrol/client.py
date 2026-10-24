@@ -10,7 +10,12 @@ from typing import Mapping, TypeVar
 from serial import Serial
 
 from .auth import AuthenticationProvider
-from .errors import iAPAckError, iAPError, iAPTimeoutError
+from .errors import (
+    iAPAckError,
+    iAPError,
+    iAPIdentificationError,
+    iAPTimeoutError,
+)
 from .lingo import General, Lingo
 from .lingo.general import AccessoryInfo, PowerOption
 from .packet import Packet
@@ -227,19 +232,23 @@ class iAPClient:
         self,
         authenticate: bool | None = None,
         power_options: PowerOption = PowerOption.LOW_POWER,
+        auth_timeout: float = 10.0,
     ) -> None:
         """
         Identify the accessory and all registered lingoes to the iPod
 
         Uses IDPS when the client was created with use_idps=True (falling back
         to IdentifyDeviceLingoes if the iPod doesn't support IDPS), otherwise
-        IdentifyDeviceLingoes.
+        IdentifyDeviceLingoes. When authentication is requested, this returns
+        once the iPod reports the authentication result.
 
         - authenticate: Request immediate authentication (Authentication 2.0),
           None to authenticate when an AuthenticationProvider is set. Required by IDPS.
         - power_options: Power the accessory draws from the iPod
+        - auth_timeout: How long to wait for authentication to finish, in seconds
 
-        Raises iAPAckError or iAPIdentificationError if the iPod rejects the identification.
+        Raises iAPAckError or iAPIdentificationError if the iPod rejects the
+        identification or authentication.
         """
 
         if authenticate is None:
@@ -257,6 +266,11 @@ class iAPClient:
 
         self._identify_args = None
 
+        if authenticate:
+            # The iPod drives authentication right after identification; the
+            # General lingo answers its requests on the reader thread
+            self.general.reset_authentication()
+
         if self._use_idps:
             try:
                 self.general.run_idps(lingo_ids, options, device_id, self.accessory_info)
@@ -269,6 +283,14 @@ class iAPClient:
                 self.general.identify_device_lingoes(lingo_ids, options, device_id)
         else:
             self.general.identify_device_lingoes(lingo_ids, options, device_id)
+
+        if authenticate and not self.general.wait_for_authentication(auth_timeout):
+            status = self.general.authentication_status
+            raise iAPIdentificationError(
+                "Authentication timed out"
+                if status is None
+                else f"Authentication failed with status 0x{status:02X}"
+            )
 
         self._identify_args = (authenticate, power_options)
 
@@ -290,17 +312,24 @@ class iAPClient:
             return transaction_id
 
     def _build_packet(
-        self, lingo: Lingo, command_id: int, data: bytes, transaction_id: bool | None
+        self,
+        lingo: Lingo,
+        command_id: int,
+        data: bytes,
+        transaction_id: bool | int | None,
     ) -> Packet:
         if transaction_id is None:
             transaction_id = self._transaction_ids_enabled
 
-        return Packet(
-            lingo.LINGO_ID,
-            command_id,
-            data,
-            self._next_transaction_id() if transaction_id else None,
-        )
+        if transaction_id is True:
+            tid: int | None = self._next_transaction_id()
+        elif transaction_id is False:
+            tid = None
+        else:
+            # An explicit transaction ID, e.g. echoed back on an auth response
+            tid = transaction_id
+
+        return Packet(lingo.LINGO_ID, command_id, data, tid)
 
     def _send(self, lingo: Lingo, packet: Packet) -> None:
         logger.debug(
@@ -317,12 +346,13 @@ class iAPClient:
         command_id: int,
         data: bytes = b"",
         *,
-        transaction_id: bool | None = None,
+        transaction_id: bool | int | None = None,
     ) -> Packet:
         """
         Send a command without waiting for a response, returns the sent packet
 
         - transaction_id: Override whether a transaction ID is included
+          (True/False), or an explicit ID to send
         """
 
         packet = self._build_packet(lingo, command_id, data, transaction_id)

@@ -1,6 +1,6 @@
 import argparse
 
-from common import add_transport_args, make_transport
+from common import add_transport_args, make_auth, make_transport
 from pypodcontrol import iAPClient
 from pypodcontrol.lingo import SimpleRemote
 
@@ -30,7 +30,7 @@ def simple_remote_test():
     add_transport_args(parser)
     args = parser.parse_args()
 
-    with iAPClient(make_transport(args)) as iap:
+    with iAPClient(make_transport(args), auth=make_auth(args)) as iap:
         sr = iap.register(SimpleRemote())
 
         iap.start_identify()
