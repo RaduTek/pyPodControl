@@ -163,3 +163,27 @@ def test_accessory_info_no_serial_capability():
     with iAPClient(transport, accessory_info=AccessoryInfo(serial_number=None)) as iap:
         caps = int.from_bytes(_collect_accessory_info(iap, transport, 0x00), "big")
         assert not caps & (1 << 0x08)
+
+
+def test_client_wait_for_authentication():
+    transport = FakeTransport()
+    FakeiPod(transport, idps=False)
+
+    with iAPClient(transport, auth=BypassedAuthenticationProvider(), timeout=0.5) as iap:
+        iap.register(SimpleRemote)
+        assert not iap.is_authenticated
+
+        iap.start_identify()
+
+        # Authentication already finished during start_identify
+        assert iap.wait_for_authentication(0.5)
+        assert iap.is_authenticated
+
+
+def test_client_wait_for_authentication_timeout():
+    transport = FakeTransport()
+    FakeiPod(transport, idps=False, drive_auth=False)
+
+    with iAPClient(transport, timeout=0.5) as iap:
+        assert not iap.wait_for_authentication(0.1)
+        assert not iap.is_authenticated

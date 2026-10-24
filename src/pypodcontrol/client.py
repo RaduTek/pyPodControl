@@ -294,6 +294,24 @@ class iAPClient:
 
         self._identify_args = (authenticate, power_options)
 
+    def wait_for_authentication(self, timeout: float | None = None) -> bool:
+        """
+        Wait for device authentication to finish, returns whether it passed
+
+        `start_identify()` already waits when authentication is requested; use
+        this to wait again, for example after the iPod re-requests identification.
+
+        - timeout: How long to wait, in seconds, None to wait indefinitely
+        """
+
+        return self.general.wait_for_authentication(timeout)
+
+    @property
+    def is_authenticated(self) -> bool:
+        """Whether device authentication has passed"""
+
+        return self.general.authentication_status == General.AUTH_SUCCESS
+
     def reidentify(self) -> None:
         """Repeat the last start_identify(), e.g. when the iPod sends RequestIdentify"""
 
