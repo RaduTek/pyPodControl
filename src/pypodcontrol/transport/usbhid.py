@@ -1,12 +1,13 @@
+from time import monotonic, sleep
+
 from ..errors import TransportError
 from .base import Transport
+from .usbconfig import APPLE_VENDOR_ID, is_apple_mobile_device, select_iui_configuration
 
 try:
     import hid
 except ImportError:  # pragma: no cover - depends on optional dependency
     hid = None
-
-APPLE_VENDOR_ID = 0x05AC
 
 LCB_CONTINUATION = 0x01
 """Link control byte: report continues a set started by a previous report"""
@@ -116,12 +117,17 @@ class USBHIDTransport(Transport):
 
     iAP over USB HID, with the computer as USB host and the iPod as device
 
-    The iPod must be in its iPod USB Interface (iUI) configuration. Requires
-    the optional `hidapi` dependency (`pip install pyPodControl[usb]`).
+    The iPod must be in its iPod USB Interface (iUI) configuration, rather
+    than mass storage. Pass select_configuration=True to switch it on open.
+    Requires the optional `hidapi` (and for switching `pyusb`) dependencies
+    (`pip install pyPodControl[usb]`).
     """
 
     read_timeout_ms: int = 100
     """Read timeout of the reader thread, in milliseconds"""
+
+    configuration_timeout: float = 5.0
+    """Time to wait for the HID device to appear after switching configuration, in seconds"""
 
     input_reports: dict[int, int]
     """Input report sizes by report ID, parsed on open"""
@@ -134,13 +140,16 @@ class USBHIDTransport(Transport):
         vendor_id: int = APPLE_VENDOR_ID,
         product_id: int | None = None,
         path: bytes | None = None,
+        select_configuration: bool = False,
     ) -> None:
         """
         Create a new USB HID transport
 
         - vendor_id: USB vendor ID, Apple by default
-        - product_id: USB product ID, or None for the first matching device
+        - product_id: USB product ID, or None for the first iPod/iPhone/iPad
         - path: hidapi device path, overrides vendor_id and product_id
+        - select_configuration: Switch the iPod from mass storage to the iPod
+          USB Interface configuration on open (refused while its disk is mounted)
         """
 
         if hid is None:
@@ -153,22 +162,49 @@ class USBHIDTransport(Transport):
         self.vendor_id = vendor_id
         self.product_id = product_id
         self.path = path
+        self.select_configuration = select_configuration
         self.device = None
         self.input_reports = {}
         self.output_reports = {}
 
-    def _find_path(self) -> bytes:
+    def _find_path(self) -> bytes | None:
         devices = hid.enumerate(self.vendor_id, self.product_id or 0)
 
-        if not devices:
-            raise TransportError(
-                f"No HID device found for {self.vendor_id:04x}:{self.product_id or 0:04x}"
-            )
+        if self.product_id is None and self.vendor_id == APPLE_VENDOR_ID:
+            # Skip other Apple HID devices, like keyboards
+            devices = [d for d in devices if is_apple_mobile_device(d["product_id"])]
 
-        return devices[0]["path"]
+        return devices[0]["path"] if devices else None
+
+    def _wait_for_path(self, timeout: float) -> bytes:
+        # The HID device appears once the kernel has bound the new configuration
+        deadline = monotonic() + timeout
+
+        while True:
+            path = self._find_path()
+            if path is not None:
+                return path
+
+            if monotonic() >= deadline:
+                raise TransportError(
+                    f"No HID device found for {self.vendor_id:04x}:{self.product_id or 0:04x}"
+                    + ("" if self.select_configuration else
+                       ", is the iPod in its iPod USB Interface configuration?")
+                )
+
+            sleep(0.1)
 
     def _open(self) -> None:
-        path = self.path or self._find_path()
+        path = self.path
+
+        if path is None:
+            if self.select_configuration:
+                self.product_id = select_iui_configuration(
+                    self.vendor_id, self.product_id
+                )
+                path = self._wait_for_path(self.configuration_timeout)
+            else:
+                path = self._wait_for_path(0)
 
         device = hid.device()
         try:

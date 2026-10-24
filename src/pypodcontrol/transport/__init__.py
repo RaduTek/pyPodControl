@@ -1,5 +1,6 @@
 from .base import Transport
 from .uart import UARTTransport
+from .usbconfig import select_iui_configuration
 
 
 def __getattr__(name: str):

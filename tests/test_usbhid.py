@@ -79,7 +79,11 @@ class FakeHID:
         self._device = device
 
     def enumerate(self, vendor_id, product_id):
-        return [{"path": b"fake"}]
+        devices = [
+            {"path": b"keyboard", "product_id": 0x0250},
+            {"path": b"fake", "product_id": 0x1261},
+        ]
+        return [d for d in devices if product_id in (0, d["product_id"])]
 
     def device(self):
         return self._device
@@ -98,6 +102,7 @@ def test_transport_roundtrip(monkeypatch):
 
     transport = USBHIDTransport()
     transport._open()
+    assert device.path == b"fake"
     assert transport.output_reports == {3: 8, 4: 64}
 
     assert transport.parser.feed(transport._read_chunk()) == []

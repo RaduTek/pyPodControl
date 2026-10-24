@@ -35,6 +35,29 @@ with iAPClient(UARTTransport("/dev/ttyUSB0")) as iap:
 -   `UARTTransport(port, baudrate=19200)`: serial UART on the 30 pin connector
 -   `USBHIDTransport()`: USB, with the computer as host and the iPod in its iPod USB Interface (iUI) configuration. Requires `pip install pyPodControl[usb]`
 
+#### Switching the iPod to iAP mode over USB
+
+When an iPod is plugged in over USB, it starts in its mass storage configuration. iAP over HID (together with USB audio) is only available in its second configuration, the "iPod USB Interface". Pass `select_configuration=True` to switch to it when the transport opens:
+
+```python
+transport = USBHIDTransport(select_configuration=True)
+```
+
+This uses pyusb, and it refuses to switch while the iPod's disk is mounted, since switching disconnects the disk. Eject the iPod first. `select_iui_configuration()` in `pypodcontrol.transport` does the same switch on its own.
+
+On Linux, the user running the code needs access to the iPod's USB device and its hidraw node, for example with a udev rule in `/etc/udev/rules.d/70-ipod.rules`:
+
+```
+SUBSYSTEM=="usb", ATTR{idVendor}=="05ac", ATTR{idProduct}=="12??", MODE="0660", TAG+="uaccess"
+KERNEL=="hidraw*", ATTRS{idVendor}=="05ac", ATTRS{idProduct}=="12??", MODE="0660", TAG+="uaccess"
+```
+
+Alternatively, udev can always switch iPods to the iUI configuration as soon as they are connected. This makes their disks unavailable:
+
+```
+SUBSYSTEM=="usb", ATTR{idVendor}=="05ac", ATTR{idProduct}=="12??", ATTR{bConfigurationValue}="2"
+```
+
 See the `examples/` directory for complete scripts.
 
 ## Development

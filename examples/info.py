@@ -10,7 +10,7 @@ def make_transport(args) -> Transport:
     if args.usb:
         from pypodcontrol.transport import USBHIDTransport
 
-        return USBHIDTransport()
+        return USBHIDTransport(select_configuration=True)
 
     return UARTTransport(args.port, args.baudrate)
 
