@@ -76,6 +76,7 @@ def fake_usb(monkeypatch):
     util = SimpleNamespace(dispose_resources=dispose_resources)
     monkeypatch.setattr(usbconfig, "_import_pyusb", lambda: (core, util))
     monkeypatch.setattr(usbconfig, "is_mounted", lambda device: False)
+    monkeypatch.setattr(usbconfig, "device_driver", lambda device: "usb")
     return devices
 
 
@@ -113,6 +114,25 @@ def test_refuses_when_mounted(fake_usb, monkeypatch):
 
     assert select_iui_configuration(check_mounted=False) == 0x1261
     assert ipod.active == 2
+
+
+def test_warns_about_mfi_fastcharge(fake_usb, monkeypatch, caplog):
+    fake_usb.append(FakeUSBDevice())
+    monkeypatch.setattr(usbconfig, "device_driver", lambda device: "apple-mfi-fastcharge")
+
+    assert select_iui_configuration() == 0x1261
+    assert "apple-mfi-fastcharge" in caplog.text
+
+
+def test_device_driver(tmp_path, monkeypatch):
+    (tmp_path / "drivers" / "usb").mkdir(parents=True)
+    (tmp_path / "1-1").mkdir()
+    monkeypatch.setattr(usbconfig, "_sysfs_path", lambda device: str(tmp_path / "1-1"))
+
+    assert usbconfig.device_driver(None) is None
+
+    (tmp_path / "1-1" / "driver").symlink_to(tmp_path / "drivers" / "usb")
+    assert usbconfig.device_driver(None) == "usb"
 
 
 def test_no_ipod(fake_usb):

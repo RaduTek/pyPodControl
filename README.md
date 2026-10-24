@@ -79,7 +79,17 @@ Alternatively, udev can always switch iPods to the iUI configuration as soon as 
 SUBSYSTEM=="usb", ATTR{idVendor}=="05ac", ATTR{idProduct}=="12??", ATTR{bConfigurationValue}="2"
 ```
 
-Letting udev do the switch also sidesteps `pyusb`/`libusb` entirely, so `USBHIDTransport(select_configuration=False)` is enough and only `hidapi` is used.
+Letting udev do the switch means `pyusb` is not needed, so `USBHIDTransport(select_configuration=False)` is enough.
+
+#### Linux: USB stops working after unplugging an iPod
+
+On Linux, unplugging an iPod while it is in the iUI configuration can crash the kernel's `apple-mfi-fastcharge` driver (a NULL pointer dereference in `mfi_fc_disconnect`, visible in `journalctl -k`). The crash happens in the USB hub worker, so afterwards new USB devices are no longer detected and shutting down hangs until the machine is forcibly powered off. This is a kernel bug, independent of pyPodControl: `snd-usb-audio`, which binds to the iUI configuration's audio interfaces, overwrites the device data `apple-mfi-fastcharge` relies on. It happens however the configuration is switched, including with the udev rule above.
+
+The driver only controls fast charging of iPhones and iPads, so the workaround is to blacklist it and reboot:
+
+```
+echo "blacklist apple_mfi_fastcharge" | sudo tee /etc/modprobe.d/no-apple-mfi-fastcharge.conf
+```
 
 See the `examples/` directory for complete scripts.
 

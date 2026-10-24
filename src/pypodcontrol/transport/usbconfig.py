@@ -104,6 +104,25 @@ def is_mounted(device) -> bool:
     return False
 
 
+def device_driver(device) -> str | None:
+    """
+    Name of the kernel driver bound to a pyusb device (not its interfaces)
+
+    Best effort, only supported on Linux, returns None elsewhere
+    """
+
+    sysfs_path = _sysfs_path(device)
+    if sysfs_path is None:
+        return None
+
+    driver = os.path.join(sysfs_path, "driver")
+    return os.path.basename(os.path.realpath(driver)) if os.path.exists(driver) else None
+
+
+MFI_FASTCHARGE_DRIVER = "apple-mfi-fastcharge"
+"""Linux driver that crashes on unplug once the iUI configuration is selected"""
+
+
 def _active_configuration(device) -> int | None:
     try:
         return device.get_active_configuration().bConfigurationValue
@@ -186,6 +205,19 @@ def select_iui_configuration(
             if check_mounted and is_mounted(device):
                 raise TransportError(
                     "The iPod's disk is mounted, eject it before switching to the iPod USB Interface"
+                )
+
+            if device_driver(device) == MFI_FASTCHARGE_DRIVER:
+                # apple-mfi-fastcharge and snd-usb-audio (bound to the iUI
+                # audio interfaces) both keep their state in the USB device's
+                # drvdata. The audio driver overwrites it, so on unplug
+                # apple-mfi-fastcharge dereferences a bogus pointer and oopses
+                # in the USB hub worker, wedging USB until reboot
+                logger.warning(
+                    "The %s kernel driver is bound to the iPod and crashes the "
+                    "USB stack when it is unplugged in the iUI configuration; "
+                    "blacklist it (see README) before using the iPod USB Interface",
+                    MFI_FASTCHARGE_DRIVER,
                 )
 
             logger.info("Selecting iUI configuration %d", config_value)
