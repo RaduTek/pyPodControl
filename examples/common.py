@@ -13,9 +13,10 @@ def add_transport_args(parser: argparse.ArgumentParser) -> None:
         "--usb", action="store_true", help="Use USB HID transport instead of UART"
     )
     group.add_argument(
-        "--auth",
-        action="store_true",
-        help="Authenticate using the bypass provider (needs a patched iPod)",
+        "--no-auth",
+        dest="auth",
+        action="store_false",
+        help="Skip authentication (identify only; use for a stock iPod)",
     )
     group.add_argument(
         "--port", default="/dev/ttyUSB0", help="UART serial port (default: %(default)s)"
@@ -51,4 +52,8 @@ def make_transport(args: argparse.Namespace) -> Transport:
 def make_auth(args: argparse.Namespace) -> AuthenticationProvider | None:
     """Create the authentication provider selected by the arguments"""
 
-    return BypassedAuthenticationProvider() if args.auth else None
+    if not args.auth:
+        return None
+
+    logging.info("Authenticating with the bypass provider (needs a patched iPod)")
+    return BypassedAuthenticationProvider()

@@ -114,3 +114,52 @@ def test_no_provider_ignores_auth_request():
         # An unsolicited auth request without a provider is ignored, not answered
         transport.inject(b"\x00\x14")
         assert not done.wait(0.3)
+
+
+def _collect_accessory_info(iap, transport, info_type, params=b""):
+    """Inject a GetAccessoryInfo request and return the RetAccessoryInfo payload"""
+    import queue
+
+    sent: "queue.Queue[bytes]" = queue.Queue()
+    transport.on_send = sent.put
+    transport.inject(bytes([0x00, 0x27, info_type]) + params)
+    payload = sent.get(timeout=1.0)
+    assert payload[:2] == bytes([0x00, 0x28])
+    return payload[2:]
+
+
+def test_accessory_info_responses():
+    from pypodcontrol import AccessoryInfo
+
+    transport = FakeTransport()
+    info = AccessoryInfo(
+        name="Remote",
+        manufacturer="Acme",
+        model_number="M1",
+        serial_number="SN1",
+        firmware_version=(1, 2, 3),
+        hardware_version=(4, 5, 6),
+    )
+    with iAPClient(transport, accessory_info=info) as iap:
+        get = lambda t, p=b"": _collect_accessory_info(iap, transport, t, p)
+
+        caps = int.from_bytes(get(0x00), "big")
+        for bit in (0x00, 0x01, 0x04, 0x05, 0x06, 0x07, 0x08):
+            assert caps & (1 << bit)
+
+        assert get(0x01) == bytes([0x01]) + b"Remote\x00"
+        assert get(0x04) == bytes([0x04, 1, 2, 3])
+        assert get(0x05) == bytes([0x05, 4, 5, 6])
+        assert get(0x06) == bytes([0x06]) + b"Acme\x00"
+        assert get(0x07) == bytes([0x07]) + b"M1\x00"
+        assert get(0x08) == bytes([0x08]) + b"SN1\x00"
+        assert get(0x03, bytes([0x02])) == bytes([0x03, 0x02, 1, 0])  # lingo 0x02 version
+
+
+def test_accessory_info_no_serial_capability():
+    from pypodcontrol import AccessoryInfo
+
+    transport = FakeTransport()
+    with iAPClient(transport, accessory_info=AccessoryInfo(serial_number=None)) as iap:
+        caps = int.from_bytes(_collect_accessory_info(iap, transport, 0x00), "big")
+        assert not caps & (1 << 0x08)

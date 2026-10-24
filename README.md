@@ -49,7 +49,7 @@ with iAPClient(UARTTransport("/dev/ttyUSB0"), auth=auth) as iap:
 
 The iPod still performs a genuine certificate check, so a real Apple X.509 certificate is required. One captured from a successful authentication ships with the library (`pypodcontrol/auth/apple_auth_cert.bin`) and is used by default; pass a different path to the constructor to override it. This only works on a patched iPod; a stock iPod rejects the mock signature.
 
-The examples accept `--auth` to authenticate this way.
+The examples authenticate this way by default; pass `--no-auth` to identify without authenticating (for a stock iPod).
 
 ### Transports
 

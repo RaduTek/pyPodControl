@@ -220,6 +220,8 @@ class General(Lingo):
             self._on_cert_ack(packet.data[0] if packet.data else 0x00)
         elif command_id == self.command_id("AckDevAuthenticationStatus"):
             self._on_authentication_status(packet.data)
+        elif command_id == self.command_id("GetAccessoryInfo"):
+            self._on_get_accessory_info(packet)
         else:
             # An iPodAck of a certificate section releases the next section
             ack = self.parse_ack(packet)
@@ -367,6 +369,65 @@ class General(Lingo):
             logger.info("Authentication passed")
         else:
             logger.warning("Authentication failed: status 0x%02X", status)
+
+    # --- accessory information ------------------------------------------------
+    #
+    # After a non-IDPS IdentifyDeviceLingoes, the iPod asks for accessory
+    # information by type (GetAccessoryInfo). The accessory must answer each
+    # request, or identification/authentication stalls.
+
+    def _on_get_accessory_info(self, packet: Packet) -> None:
+        """The iPod requests a piece of accessory information"""
+
+        info_type = packet.data[0] if packet.data else 0x00
+        response = self._accessory_info(info_type, packet.data[1:])
+
+        if response is None:
+            logger.debug("No response for accessory info type 0x%02X", info_type)
+            return
+
+        echo = packet.transaction_id if packet.transaction_id is not None else False
+        self.send(
+            "RetAccessoryInfo", bytes([info_type]) + response, transaction_id=echo
+        )
+
+    def _accessory_info(self, info_type: int, params: bytes) -> bytes | None:
+        """Build the RetAccessoryInfo data for a requested info type"""
+
+        info = self.iap.accessory_info
+
+        if info_type == 0x00:
+            # Capabilities: a bit for each supported accessory info type
+            supported = {0x00, 0x01, 0x03, 0x04, 0x05, 0x06, 0x07, 0x09}
+            if info.serial_number is not None:
+                supported.add(0x08)
+
+            mask = 0
+            for supported_type in supported:
+                mask |= 1 << supported_type
+            return encode_int(mask)
+
+        if info_type == self.ACCESSORY_INFO_NAME:
+            return self._info_string(info.name)
+        if info_type == 0x03:  # minimum supported version of the requested lingo
+            lingo_id = params[0] if params else 0x00
+            return bytes([lingo_id, 1, 0])
+        if info_type == self.ACCESSORY_INFO_FIRMWARE_VERSION:
+            return bytes(info.firmware_version)
+        if info_type == self.ACCESSORY_INFO_HARDWARE_VERSION:
+            return bytes(info.hardware_version)
+        if info_type == self.ACCESSORY_INFO_MANUFACTURER:
+            return self._info_string(info.manufacturer)
+        if info_type == self.ACCESSORY_INFO_MODEL_NUMBER:
+            return self._info_string(info.model_number)
+        if info_type == self.ACCESSORY_INFO_SERIAL_NUMBER and info.serial_number:
+            return self._info_string(info.serial_number)
+        if info_type == 0x09:  # incoming maximum payload size (>= 128)
+            return encode_short(self.DEFAULT_MAX_PAYLOAD_SIZE)
+        if info_type == 0x0B:  # supported status types: none
+            return encode_int(0)
+
+        return None
 
     @staticmethod
     def identify_options(
