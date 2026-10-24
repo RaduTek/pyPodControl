@@ -213,6 +213,7 @@ class General(Lingo):
 
     def handle_packet(self, packet: Packet) -> None:
         command_id = packet.command_id
+        handled = True
 
         if command_id == self.command_id("RequestIdentify"):
             self._on_request_identify()
@@ -229,12 +230,16 @@ class General(Lingo):
         else:
             # An iPodAck of a certificate section releases the next section
             ack = self.parse_ack(packet)
-            if ack is not None and ack[1] == self.command_id(
+            handled = ack is not None and ack[1] == self.command_id(
                 "RetDevAuthenticationInfo"
-            ):
+            )
+            if handled:
                 self._on_cert_ack(ack[0])
 
-        super().handle_packet(packet)
+        if handled:
+            self.notify_listeners(packet)
+        else:
+            super().handle_packet(packet)
 
     def _on_request_identify(self) -> None:
         """The iPod asks the accessory to identify again"""
@@ -290,6 +295,7 @@ class General(Lingo):
 
         # IDPS sends the accessory info in FID tokens, the iPod doesn't ask for it
         if self._info_requested:
+            logger.debug("Waiting for the iPod to request the remaining accessory info")
             remaining = None if deadline is None else max(0.0, deadline - time.monotonic())
             if not self._info_done.wait(remaining):
                 logger.warning(
@@ -305,6 +311,8 @@ class General(Lingo):
         if self.iap.auth is None:
             logger.warning("iPod requested authentication but no provider is set")
             return
+
+        logger.info("iPod requested the authentication certificate")
 
         # Sending the certificate waits for ACKs between sections, so it must
         # not run on the reader thread that delivers those ACKs
@@ -366,6 +374,11 @@ class General(Lingo):
                 return
 
     def _on_cert_ack(self, status: int) -> None:
+        if status == 0x00:
+            logger.debug("Certificate acknowledged")
+        else:
+            logger.warning("Certificate rejected: status 0x%02X", status)
+
         self._cert_ack_status = status
         self._cert_ack.set()
 
@@ -379,6 +392,11 @@ class General(Lingo):
 
         # The payload is the challenge followed by a 1 byte retry counter
         challenge = packet.data[:-1] if packet.data else b""
+        logger.info(
+            "Signing %d byte authentication challenge (retry counter %d)",
+            len(challenge),
+            packet.data[-1] if packet.data else 0,
+        )
         signature = auth.sign_challenge(challenge)
 
         echo = packet.transaction_id if packet.transaction_id is not None else False
@@ -421,7 +439,8 @@ class General(Lingo):
 
         with self._auth_lock:
             self._info_requested.add(key)
-            if not self._missing_info():
+            if not self._missing_info() and not self._info_done.is_set():
+                logger.debug("iPod requested all accessory info")
                 self._info_done.set()
 
     def _supported_info_types(self) -> set[int]:
@@ -509,6 +528,13 @@ class General(Lingo):
 
         # IdentifyDeviceLingoes never carries a transaction ID, and disables them
         self.iap.transaction_ids_enabled = False
+
+        logger.debug(
+            "IdentifyDeviceLingoes: lingoes 0x%08X, options 0x%08X, device ID 0x%08X",
+            self.lingoes_mask(lingo_ids),
+            options,
+            device_id,
+        )
 
         self.request(
             "IdentifyDeviceLingoes",
@@ -694,6 +720,7 @@ class General(Lingo):
         transport.max_payload_size = min(
             transport.max_payload_size, self.request_transport_max_payload_size()
         )
+        logger.debug("Max payload size: %d bytes", transport.max_payload_size)
 
         tokens = [self.identify_token(lingo_ids, options, device_id)]
         tokens += self.accessory_tokens(info)
@@ -701,6 +728,10 @@ class General(Lingo):
         acks = self.set_fid_token_values(tokens)
 
         for ack in acks:
+            logger.debug(
+                "FID token %02X:%02X status %d", ack.fid_type, ack.fid_subtype, ack.status
+            )
+
             if ack.status == FIDTokenStatus.ACCEPTED:
                 continue
 
@@ -713,6 +744,7 @@ class General(Lingo):
                 continue
 
             # Abandon IDPS, the iPod would reject it anyway
+            logger.warning("Abandoning IDPS")
             self.send("EndIDPS", encode_byte(2))
 
             if ack.status == FIDTokenStatus.LINGOES_BUSY:
@@ -727,6 +759,7 @@ class General(Lingo):
             )
 
         idps_status = self.end_idps(0)
+        logger.debug("IDPS status: %d", idps_status)
         if idps_status != 0:
             raise iAPIdentificationError(f"IDPS failed with status {idps_status}")
 

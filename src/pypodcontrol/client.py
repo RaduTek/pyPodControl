@@ -10,6 +10,7 @@ from typing import Mapping, TypeVar
 from serial import Serial
 
 from .auth import AuthenticationProvider
+from .debug import ack_status_name, log_packet
 from .errors import (
     iAPAckError,
     iAPError,
@@ -205,6 +206,8 @@ class iAPClient:
         self._transaction_ids_enabled = self._use_idps
         self._identify_args = None
 
+        logger.info("Opening %s", type(self.transport).__name__)
+
         self.transport.set_receiver(self._on_payload)
         self.transport.open()
         self.transport.wake()
@@ -217,6 +220,10 @@ class iAPClient:
 
         with self._lock:
             pending, self._pending = self._pending, []
+
+        logger.info("Closed %s", type(self.transport).__name__)
+        if pending:
+            logger.debug("Failing %d pending request(s)", len(pending))
 
         for p in pending:
             p.future.set_exception(iAPError("Client closed"))
@@ -266,6 +273,13 @@ class iAPClient:
 
         self._identify_args = None
 
+        logger.info(
+            "Identifying lingoes %s using %s, %s",
+            ", ".join(type(lingo).__name__ for _, lingo in sorted(self._lingos.items())),
+            "IDPS" if self._use_idps else "IdentifyDeviceLingoes",
+            "with authentication" if authenticate else "without authentication",
+        )
+
         if authenticate:
             # The iPod drives authentication right after identification; the
             # General lingo answers its requests on the reader thread
@@ -293,6 +307,7 @@ class iAPClient:
             )
 
         self._identify_args = (authenticate, power_options)
+        logger.info("Identified")
 
     def wait_for_authentication(self, timeout: float | None = None) -> bool:
         """
@@ -350,12 +365,7 @@ class iAPClient:
         return Packet(lingo.LINGO_ID, command_id, data, tid)
 
     def _send(self, lingo: Lingo, packet: Packet) -> None:
-        logger.debug(
-            "-> %s.%s %s",
-            type(lingo).__name__,
-            lingo.command_name(packet.command_id),
-            packet.data.hex(" "),
-        )
+        log_packet("->", lingo, packet)
         self.transport.send(packet.to_payload(lingo.EXTENDED_COMMAND_IDS))
 
     def send_packet(
@@ -429,6 +439,11 @@ class iAPClient:
                 if pending.deadline > time.monotonic():
                     continue
 
+                logger.debug(
+                    "No response to %s.%s",
+                    type(pending.lingo).__name__,
+                    pending.lingo.command_name(pending.command_id),
+                )
                 raise iAPTimeoutError(
                     f"No response to {type(pending.lingo).__name__}."
                     f"{pending.lingo.command_name(pending.command_id)} in time"
@@ -463,21 +478,11 @@ class iAPClient:
             logger.warning("Dropping malformed packet %s", payload.hex(" "))
             return
 
-        if lingo is None:
-            logger.debug(
-                "<- unregistered lingo 0x%02X command 0x%02X %s",
-                packet.lingo_id,
-                packet.command_id,
-                packet.data.hex(" "),
-            )
-            return
+        log_packet("<-", lingo, packet)
 
-        logger.debug(
-            "<- %s.%s %s",
-            type(lingo).__name__,
-            lingo.command_name(packet.command_id),
-            packet.data.hex(" "),
-        )
+        if lingo is None:
+            logger.debug("Ignoring packet of unregistered lingo 0x%02X", packet.lingo_id)
+            return
 
         if self._resolve_pending(lingo, packet):
             return
@@ -514,12 +519,24 @@ class iAPClient:
                     # Command pending ACKs end with the maximum wait in ms
                     if len(packet.data) >= 6:
                         wait = int.from_bytes(packet.data[-4:], "big") / 1000.0
+                        logger.debug(
+                            "%s.%s pending, waiting up to %.1f s",
+                            type(lingo).__name__,
+                            lingo.command_name(pending.command_id),
+                            wait,
+                        )
                         pending.deadline = max(
                             pending.deadline, time.monotonic() + wait
                         )
                     return True
 
                 if status != lingo.ACK_SUCCESS:
+                    logger.debug(
+                        "%s.%s rejected: %s",
+                        type(lingo).__name__,
+                        lingo.command_name(pending.command_id),
+                        ack_status_name(status),
+                    )
                     pending.future.set_exception(
                         iAPAckError(
                             status,

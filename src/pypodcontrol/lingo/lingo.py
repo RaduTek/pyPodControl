@@ -195,18 +195,19 @@ class Lingo:
         Handle an unsolicited packet from the iPod
 
         Called on the transport's reader thread. Override to react to
-        commands sent by the iPod, call super() to keep notifying listeners.
+        commands sent by the iPod, call super() for the commands the override
+        doesn't handle, or notify_listeners() for the ones it does.
         """
 
-        listeners = self._listeners.get(packet.command_id, [])
-
-        if not listeners:
+        if not self.notify_listeners(packet):
             logger.debug(
-                "%s: unhandled %s %s",
-                type(self).__name__,
-                self.command_name(packet.command_id),
-                packet.data.hex(" "),
+                "%s: unhandled %s", type(self).__name__, self.command_name(packet.command_id)
             )
+
+    def notify_listeners(self, packet: Packet) -> bool:
+        """Call the listeners of the packet's command, returns whether it has any"""
+
+        listeners = self._listeners.get(packet.command_id, [])
 
         for listener in list(listeners):
             try:
@@ -217,3 +218,5 @@ class Lingo:
                     type(self).__name__,
                     self.command_name(packet.command_id),
                 )
+
+        return bool(listeners)

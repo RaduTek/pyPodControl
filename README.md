@@ -91,6 +91,28 @@ The driver only controls fast charging of iPhones and iPads, so the workaround i
 echo "blacklist apple_mfi_fastcharge" | sudo tee /etc/modprobe.d/no-apple-mfi-fastcharge.conf
 ```
 
+### Logging
+
+pyPodControl logs through the standard `logging` module, under the `pypodcontrol` logger. Every packet sent to and received from the iPod is logged at DEBUG level to the `pypodcontrol.traffic` logger, with lingo and command names, transaction IDs and decoded ACKs:
+
+```
+-> General.RequestLingoProtocolVersion 02
+<- General.ReturnLingoProtocolVersion 02 01 03
+<- General.ACK (Bad parameter: StartIDPS) 04 38
+```
+
+`enable_logging()` prints the library's logs to stderr:
+
+```python
+import logging
+from pypodcontrol import enable_logging
+
+enable_logging()                             # debug messages and every packet
+enable_logging(logging.INFO, traffic=False)  # just what the library is doing
+```
+
+With your own logging setup, enable the packet log with `logging.getLogger("pypodcontrol.traffic").setLevel(logging.DEBUG)`. The examples take `-v` for INFO logs and `--debug` for debug logs including every packet.
+
 See the `examples/` directory for complete scripts.
 
 ## Development

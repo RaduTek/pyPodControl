@@ -1,8 +1,12 @@
 import argparse
 import logging
 
+from pypodcontrol import enable_logging
 from pypodcontrol.auth import AuthenticationProvider, BypassedAuthenticationProvider
 from pypodcontrol.transport import Transport, UARTTransport
+
+# Under pypodcontrol, so enable_logging() shows it too
+logger = logging.getLogger("pypodcontrol.examples")
 
 
 def add_transport_args(parser: argparse.ArgumentParser) -> None:
@@ -33,13 +37,25 @@ def add_transport_args(parser: argparse.ArgumentParser) -> None:
         action="store_false",
         help="USB: don't switch the iPod from mass storage to iPod USB Interface mode",
     )
-    parser.add_argument("-v", "--verbose", action="store_true", help="Log packets")
+    parser.add_argument(
+        "-v", "--verbose", action="store_true", help="Log what the library is doing"
+    )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Log debug messages, including every packet sent and received",
+    )
 
 
 def make_transport(args: argparse.Namespace) -> Transport:
     """Create the transport selected by the arguments"""
 
-    logging.basicConfig(level=logging.DEBUG if args.verbose else logging.WARNING)
+    if args.debug:
+        enable_logging(logging.DEBUG, traffic=True)
+    elif args.verbose:
+        enable_logging(logging.INFO, traffic=False)
+    else:
+        logging.basicConfig(level=logging.WARNING)
 
     if args.usb:
         from pypodcontrol.transport import USBHIDTransport
@@ -55,5 +71,5 @@ def make_auth(args: argparse.Namespace) -> AuthenticationProvider | None:
     if not args.auth:
         return None
 
-    logging.info("Authenticating with the bypass provider (needs a patched iPod)")
+    logger.info("Authenticating with the bypass provider (needs a patched iPod)")
     return BypassedAuthenticationProvider()
