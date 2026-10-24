@@ -2,7 +2,8 @@ import sys
 import tty
 import termios
 from pypodcontrol import iAPClient
-from pypodcontrol.lingo import General, SimpleRemote
+from pypodcontrol.lingo import SimpleRemote
+from pypodcontrol.transport import UARTTransport
 
 keymap = {
     "z": "stop",
@@ -40,13 +41,12 @@ def print_help():
 
 
 def keyboard_remote():
-    iap = iAPClient("/dev/ttyUSB0")
+    iap = iAPClient(UARTTransport("/dev/ttyUSB0"))
+    iap.open()
 
-    g = General(iap)
+    sr = iap.register(SimpleRemote())
 
-    g.identify(SimpleRemote)
-
-    sr = SimpleRemote(iap)
+    iap.general.identify(sr)
 
     term_set = tty.setcbreak(sys.stdin.fileno())
 
@@ -69,6 +69,8 @@ def keyboard_remote():
 
         print("Press:", button, " " * 6, end="\r", flush=True)
         sr.press_button(button)
+
+    iap.close()
 
     print("\nBye, bye!")
     termios.tcsetattr(sys.stdin.fileno(), termios.TCSAFLUSH, term_set)

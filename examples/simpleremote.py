@@ -1,6 +1,7 @@
 import sys
 from pypodcontrol import iAPClient
-from pypodcontrol.lingo import General, SimpleRemote
+from pypodcontrol.lingo import SimpleRemote
+from pypodcontrol.transport import UARTTransport
 
 
 def print_usage(msg: str = ""):
@@ -29,15 +30,12 @@ def simple_remote_test():
     if button not in SimpleRemote.buttons:
         return print_usage(f"Unknown button: {button}")
 
-    iap = iAPClient("/dev/ttyUSB0")
+    with iAPClient(UARTTransport("/dev/ttyUSB0")) as iap:
+        sr = iap.register(SimpleRemote())
 
-    g = General(iap)
+        iap.general.identify(sr)
 
-    g.identify(SimpleRemote)
-
-    sr = SimpleRemote(iap)
-
-    sr.press_button(button, duration, repeat)
+        sr.press_button(button, duration, repeat)
 
 
 if __name__ == "__main__":
