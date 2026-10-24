@@ -1,4 +1,5 @@
 import threading
+import time
 
 import pytest
 
@@ -187,3 +188,51 @@ def test_client_wait_for_authentication_timeout():
     with iAPClient(transport, timeout=0.5) as iap:
         assert not iap.wait_for_authentication(0.1)
         assert not iap.is_authenticated
+
+
+def test_authentication_waits_for_accessory_info():
+    transport = FakeTransport()
+    ipod = FakeiPod(transport, idps=False)
+    answered = []
+
+    def get_info(info_type: int, params: bytes = b"") -> None:
+        transport.inject(bytes([0x00, 0x27, info_type]) + params)
+
+    def query_after_auth():
+        for info_type, params in [(0x03, b"\x00"), (0x03, b"\x02"), (0x04, b""),
+                                  (0x05, b""), (0x06, b""), (0x07, b""), (0x09, b"")]:
+            time.sleep(0.02)
+            get_info(info_type, params)
+
+    on_send = ipod.on_send
+
+    def on_send_wrapper(payload: bytes) -> None:
+        if payload[1] == 0x28:  # RetAccessoryInfo
+            answered.append(payload[2])
+        elif payload[1] == 0x18:  # RetDevAuthenticationSignature
+            # Like a real iPod: capabilities and name are requested before the
+            # authentication status, the remaining info types after it
+            get_info(0x00)
+            get_info(0x01)
+            threading.Thread(target=query_after_auth, daemon=True).start()
+        on_send(payload)
+
+    transport.on_send = on_send_wrapper
+
+    with iAPClient(transport, auth=BypassedAuthenticationProvider(), timeout=0.5) as iap:
+        iap.register(SimpleRemote)
+        iap.start_identify()
+
+        assert answered == [0x00, 0x01, 0x03, 0x03, 0x04, 0x05, 0x06, 0x07, 0x09]
+
+
+def test_authentication_without_accessory_info():
+    transport = FakeTransport()
+    FakeiPod(transport, idps=False)
+
+    with iAPClient(transport, auth=BypassedAuthenticationProvider(), timeout=0.5) as iap:
+        start = time.monotonic()
+        iap.start_identify(auth_timeout=2.0)
+
+        # The iPod never asked for accessory info, so there's nothing to wait for
+        assert time.monotonic() - start < 1.0

@@ -1,5 +1,6 @@
 import logging
 import threading
+import time
 from dataclasses import dataclass
 from enum import IntEnum
 from typing import Final, Iterable
@@ -207,6 +208,9 @@ class General(Lingo):
         self._cert_ack = threading.Event()
         self._cert_ack_status = 0x00
 
+        self._info_requested: set[int | tuple[int, int]] = set()
+        self._info_done = threading.Event()
+
     def handle_packet(self, packet: Packet) -> None:
         command_id = packet.command_id
 
@@ -258,6 +262,8 @@ class General(Lingo):
         with self._auth_lock:
             self._auth_status = None
             self._auth_event.clear()
+            self._info_requested.clear()
+            self._info_done.clear()
 
     @property
     def authentication_status(self) -> int | None:
@@ -266,12 +272,32 @@ class General(Lingo):
         return self._auth_status
 
     def wait_for_authentication(self, timeout: float | None = None) -> bool:
-        """Wait for authentication to finish, returns whether it passed"""
+        """
+        Wait for authentication to finish, returns whether it passed
+
+        After a non-IDPS identification the iPod keeps requesting accessory
+        information once authentication passes, so this also waits until every
+        advertised info type has been requested and answered.
+        """
+
+        deadline = None if timeout is None else time.monotonic() + timeout
 
         if not self._auth_event.wait(timeout):
             return False
 
-        return self._auth_status == self.AUTH_SUCCESS
+        if self._auth_status != self.AUTH_SUCCESS:
+            return False
+
+        # IDPS sends the accessory info in FID tokens, the iPod doesn't ask for it
+        if self._info_requested:
+            remaining = None if deadline is None else max(0.0, deadline - time.monotonic())
+            if not self._info_done.wait(remaining):
+                logger.warning(
+                    "iPod didn't request all accessory info, missing: %s",
+                    self._missing_info(),
+                )
+
+        return True
 
     def _on_get_dev_authentication_info(self, transaction_id: int | None) -> None:
         """The iPod requests the accessory certificate"""
@@ -384,12 +410,39 @@ class General(Lingo):
 
         if response is None:
             logger.debug("No response for accessory info type 0x%02X", info_type)
-            return
+        else:
+            echo = packet.transaction_id if packet.transaction_id is not None else False
+            self.send(
+                "RetAccessoryInfo", bytes([info_type]) + response, transaction_id=echo
+            )
 
-        echo = packet.transaction_id if packet.transaction_id is not None else False
-        self.send(
-            "RetAccessoryInfo", bytes([info_type]) + response, transaction_id=echo
-        )
+        # Type 0x03 is requested once per lingo
+        key = (info_type, packet.data[1]) if info_type == 0x03 and len(packet.data) > 1 else info_type
+
+        with self._auth_lock:
+            self._info_requested.add(key)
+            if not self._missing_info():
+                self._info_done.set()
+
+    def _supported_info_types(self) -> set[int]:
+        """Accessory info types advertised in the capabilities response"""
+
+        supported = {0x00, 0x01, 0x03, 0x04, 0x05, 0x06, 0x07, 0x09}
+        if self.iap.accessory_info.serial_number is not None:
+            supported.add(0x08)
+        return supported
+
+    def _missing_info(self) -> set[int | tuple[int, int]]:
+        """Advertised accessory info the iPod hasn't requested yet"""
+
+        expected: set[int | tuple[int, int]] = set()
+        for info_type in self._supported_info_types() - {0x00}:
+            if info_type == 0x03:
+                expected.update((0x03, lingo_id) for lingo_id in self.iap.lingos)
+            else:
+                expected.add(info_type)
+
+        return expected - self._info_requested
 
     def _accessory_info(self, info_type: int, params: bytes) -> bytes | None:
         """Build the RetAccessoryInfo data for a requested info type"""
@@ -398,12 +451,8 @@ class General(Lingo):
 
         if info_type == 0x00:
             # Capabilities: a bit for each supported accessory info type
-            supported = {0x00, 0x01, 0x03, 0x04, 0x05, 0x06, 0x07, 0x09}
-            if info.serial_number is not None:
-                supported.add(0x08)
-
             mask = 0
-            for supported_type in supported:
+            for supported_type in self._supported_info_types():
                 mask |= 1 << supported_type
             return encode_int(mask)
 
