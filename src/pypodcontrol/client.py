@@ -12,6 +12,7 @@ from serial import Serial
 from .auth import AuthenticationProvider
 from .errors import iAPAckError, iAPError, iAPTimeoutError
 from .lingo import General, Lingo
+from .lingo.general import AccessoryInfo, PowerOption
 from .packet import Packet
 from .transport import Transport, UARTTransport
 
@@ -54,6 +55,7 @@ class iAPClient:
         *,
         auth: AuthenticationProvider | None = None,
         use_idps: bool = False,
+        accessory_info: AccessoryInfo | None = None,
         timeout: float = 2.0,
     ) -> None:
         """
@@ -62,6 +64,7 @@ class iAPClient:
         - transport: Transport to use, or a serial port name / Serial instance for UART
         - auth: Authentication provider, required for IDPS
         - use_idps: Identify using IDPS (with transaction IDs) instead of the legacy process
+        - accessory_info: Accessory information sent during IDPS
         - timeout: Default response timeout, in seconds
         """
 
@@ -76,6 +79,9 @@ class iAPClient:
 
         self._auth = auth
         self._use_idps = use_idps
+        self.accessory_info = accessory_info or AccessoryInfo()
+
+        self._identify_args: tuple[bool, PowerOption] | None = None
 
         self._lingos: dict[int, Lingo] = {}
         self._pending: list[_Pending] = []
@@ -97,6 +103,12 @@ class iAPClient:
         """Whether the accessory identifies using IDPS"""
 
         return self._use_idps
+
+    @property
+    def is_identified(self) -> bool:
+        """Whether start_identify() completed since the client was opened"""
+
+        return self._identify_args is not None
 
     @property
     def general(self) -> General:
@@ -186,6 +198,7 @@ class iAPClient:
 
         self._transaction_id = 0
         self._transaction_ids_enabled = self._use_idps
+        self._identify_args = None
 
         self.transport.set_receiver(self._on_payload)
         self.transport.open()
@@ -209,6 +222,66 @@ class iAPClient:
 
     def __exit__(self, *exc) -> None:
         self.close()
+
+    def start_identify(
+        self,
+        authenticate: bool | None = None,
+        power_options: PowerOption = PowerOption.LOW_POWER,
+    ) -> None:
+        """
+        Identify the accessory and all registered lingoes to the iPod
+
+        Uses IDPS when the client was created with use_idps=True (falling back
+        to IdentifyDeviceLingoes if the iPod doesn't support IDPS), otherwise
+        IdentifyDeviceLingoes.
+
+        - authenticate: Request immediate authentication (Authentication 2.0),
+          None to authenticate when an AuthenticationProvider is set. Required by IDPS.
+        - power_options: Power the accessory draws from the iPod
+
+        Raises iAPAckError or iAPIdentificationError if the iPod rejects the identification.
+        """
+
+        if authenticate is None:
+            authenticate = self._auth is not None
+
+        if authenticate and self._auth is None:
+            raise ValueError("Authentication requires an AuthenticationProvider")
+
+        if self._use_idps and not authenticate:
+            raise ValueError("IDPS requires authentication")
+
+        options = General.identify_options(authenticate, power_options)
+        device_id = self._auth.device_id if authenticate and self._auth else 0
+        lingo_ids = sorted(self._lingos)
+
+        self._identify_args = None
+
+        if self._use_idps:
+            try:
+                self.general.run_idps(lingo_ids, options, device_id, self.accessory_info)
+            except iAPAckError as e:
+                # Bad parameter: the iPod doesn't support IDPS
+                if e.status != 0x04 or e.command != "General.StartIDPS":
+                    raise
+
+                logger.info("iPod doesn't support IDPS, using IdentifyDeviceLingoes")
+                self.general.identify_device_lingoes(lingo_ids, options, device_id)
+        else:
+            self.general.identify_device_lingoes(lingo_ids, options, device_id)
+
+        self._identify_args = (authenticate, power_options)
+
+    def reidentify(self) -> None:
+        """Repeat the last start_identify(), e.g. when the iPod sends RequestIdentify"""
+
+        if self._identify_args is None:
+            raise iAPError("start_identify() was not called")
+
+        try:
+            self.start_identify(*self._identify_args)
+        except iAPError:
+            logger.exception("Identifying again failed")
 
     def _next_transaction_id(self) -> int:
         with self._lock:

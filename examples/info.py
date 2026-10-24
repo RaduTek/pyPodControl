@@ -11,7 +11,8 @@ def info():
     args = parser.parse_args()
 
     with iAPClient(make_transport(args)) as iap:
-        iap.general.identify(SimpleRemote)
+        iap.register(SimpleRemote)
+        iap.start_identify()
 
         try:
             print("Name:", iap.general.request_ipod_name())

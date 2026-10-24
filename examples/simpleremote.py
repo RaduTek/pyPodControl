@@ -33,7 +33,7 @@ def simple_remote_test():
     with iAPClient(make_transport(args)) as iap:
         sr = iap.register(SimpleRemote())
 
-        iap.general.identify(sr)
+        iap.start_identify()
 
         sr.press_button(args.button, args.duration, args.repeat)
 

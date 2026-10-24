@@ -50,7 +50,7 @@ def keyboard_remote():
     with iAPClient(make_transport(args)) as iap:
         sr = iap.register(SimpleRemote())
 
-        iap.general.identify(sr)
+        iap.start_identify()
 
         term_set = tty.setcbreak(sys.stdin.fileno())
 

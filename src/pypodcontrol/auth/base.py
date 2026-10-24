@@ -17,6 +17,11 @@ class AuthenticationProvider(ABC):
     def protocol_version(self) -> tuple[int, int]:
         """Authentication protocol version (major, minor), e.g. (2, 0)"""
 
+    @property
+    @abstractmethod
+    def device_id(self) -> int:
+        """Accessory Device ID (32 bits) supplied by the authentication coprocessor"""
+
     @abstractmethod
     def get_certificate(self) -> bytes:
         """Accessory certificate data, sent in RetDevAuthenticationInfo"""

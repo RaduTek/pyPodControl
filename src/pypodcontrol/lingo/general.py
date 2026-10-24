@@ -1,7 +1,70 @@
-from typing import Final
+import logging
+import threading
+from dataclasses import dataclass
+from enum import IntEnum
+from typing import Final, Iterable
 
-from ..packet import encode_byte
+from ..errors import iAPAckError, iAPIdentificationError
+from ..packet import Packet, encode_byte, encode_int, encode_long, encode_short
 from .lingo import Lingo
+
+logger = logging.getLogger(__name__)
+
+
+class PowerOption(IntEnum):
+    """Power the accessory draws from the iPod, declared during identification"""
+
+    LOW_POWER = 0b00
+    """Not more than 5 mA at any time"""
+
+    INTERMITTENT_HIGH_POWER = 0b01
+    """More than 5 mA (up to 100 mA) during playback"""
+
+    CONSTANT_HIGH_POWER = 0b11
+    """More than 5 mA (up to 100 mA) at all times, only if the accessory supplies power to the iPod"""
+
+
+class FIDTokenStatus(IntEnum):
+    """AckFIDTokenValues acknowledgment status"""
+
+    ACCEPTED = 0
+    REQUIRED_FAILED = 1
+    OPTIONAL_FAILED = 2
+    NOT_SUPPORTED = 3
+    LINGOES_BUSY = 4
+    MAXIMUM_CONNECTIONS = 5
+
+
+@dataclass(frozen=True)
+class AccessoryInfo:
+    """
+    ### AccessoryInfo
+
+    Accessory information sent to the iPod during IDPS (AccessoryInfoToken)
+    """
+
+    name: str = "pyPodControl"
+    manufacturer: str = "pyPodControl"
+    model_number: str = "pyPodControl"
+    serial_number: str | None = None
+    firmware_version: tuple[int, int, int] = (1, 0, 0)
+    hardware_version: tuple[int, int, int] = (1, 0, 0)
+    rf_certifications: int = 0
+    """RF certification declaration mask, must be 0 unless tested by an authorized lab"""
+
+    capabilities: int = 0
+    """AccessoryCapsToken capabilities bitmask (e.g. bit 0: analog line-out)"""
+
+
+@dataclass(frozen=True)
+class FIDTokenAck:
+    """Acknowledgment of one FID token-value field"""
+
+    fid_type: int
+    fid_subtype: int
+    status: int
+    data: bytes = b""
+    """Extra acknowledgment data, e.g. the info type of an AccessoryInfoToken"""
 
 
 class General(Lingo):
@@ -105,6 +168,302 @@ class General(Lingo):
         0x18: "Incompatible video settings for iPod Out",
     }
     """ACK status codes, shared by all lingos"""
+
+    AUTHENTICATE_IMMEDIATELY: Final = 0b10
+    """Identification option: authenticate immediately after identification (Authentication 2.0)"""
+
+    DEFAULT_MAX_PAYLOAD_SIZE: Final = 506
+    """Max payload size of iPods that don't support RequestTransportMaxPayloadSize"""
+
+    FID_IDENTIFY: Final = 0x00
+    FID_ACCESSORY_CAPS: Final = 0x01
+    FID_ACCESSORY_INFO: Final = 0x02
+    """FID token subtypes (FIDType 0x00)"""
+
+    FID_REQUIRED: Final = (FID_IDENTIFY, FID_ACCESSORY_CAPS, FID_ACCESSORY_INFO)
+    """FID tokens required by IDPS"""
+
+    ACCESSORY_INFO_NAME: Final = 0x01
+    ACCESSORY_INFO_FIRMWARE_VERSION: Final = 0x04
+    ACCESSORY_INFO_HARDWARE_VERSION: Final = 0x05
+    ACCESSORY_INFO_MANUFACTURER: Final = 0x06
+    ACCESSORY_INFO_MODEL_NUMBER: Final = 0x07
+    ACCESSORY_INFO_SERIAL_NUMBER: Final = 0x08
+    ACCESSORY_INFO_RF_CERTIFICATIONS: Final = 0x0C
+    """AccessoryInfoToken info types"""
+
+    def handle_packet(self, packet: Packet) -> None:
+        if packet.command_id == self.command_id("RequestIdentify"):
+            self._on_request_identify()
+
+        super().handle_packet(packet)
+
+    def _on_request_identify(self) -> None:
+        """The iPod asks the accessory to identify again"""
+
+        if not self.iap.is_identified:
+            return
+
+        logger.info("iPod requested identification, identifying again")
+
+        # Runs on the reader thread, which must stay free to receive the responses
+        threading.Thread(
+            target=self.iap.reidentify, name="iAP-reidentify", daemon=True
+        ).start()
+
+    @staticmethod
+    def identify_options(
+        authenticate: bool, power: PowerOption = PowerOption.LOW_POWER
+    ) -> int:
+        """Encode the options of IdentifyDeviceLingoes / IdentifyToken"""
+
+        options = General.AUTHENTICATE_IMMEDIATELY if authenticate else 0
+        return options | (PowerOption(power) << 2)
+
+    @staticmethod
+    def lingoes_mask(lingo_ids: Iterable[int]) -> int:
+        """Encode lingo IDs as the Device Lingoes Spoken bit field"""
+
+        mask = 1 << General.LINGO_ID
+        for lingo_id in lingo_ids:
+            mask |= 1 << lingo_id
+        return mask
+
+    def identify_device_lingoes(
+        self, lingo_ids: Iterable[int], options: int = 0, device_id: int = 0
+    ) -> None:
+        """
+        Identify the lingoes supported by the accessory (non-IDPS identification)
+
+        - lingo_ids: IDs of the supported lingoes (General is always included)
+        - options: Identification options, see identify_options()
+        - device_id: Device ID from the authentication coprocessor, 0 without authentication
+        """
+
+        # IdentifyDeviceLingoes never carries a transaction ID, and disables them
+        self.iap.transaction_ids_enabled = False
+
+        self.request(
+            "IdentifyDeviceLingoes",
+            encode_int(self.lingoes_mask(lingo_ids))
+            + encode_int(options)
+            + encode_int(device_id),
+        )
+
+    def start_idps(self) -> None:
+        """Start the IDPS process, raises iAPAckError if the iPod refuses it"""
+
+        # Transaction IDs are required from StartIDPS onwards
+        self.iap.transaction_ids_enabled = True
+
+        self.request("StartIDPS")
+
+    def request_transport_max_payload_size(self) -> int:
+        """Get the maximum payload size of the current transport"""
+
+        try:
+            response = self.request(
+                "RequestTransportMaxPayloadSize",
+                response="ReturnTransportMaxPayloadSize",
+            )
+        except iAPAckError as e:
+            if e.status != 0x04:
+                raise
+            return self.DEFAULT_MAX_PAYLOAD_SIZE
+
+        if len(response.data) < 2:
+            raise ValueError(f"Malformed max payload response: {response.data.hex(' ')}")
+
+        return int.from_bytes(response.data[:2], "big")
+
+    @staticmethod
+    def fid_token(fid_subtype: int, data: bytes = b"", fid_type: int = 0x00) -> bytes:
+        """Encode a FID token-value field"""
+
+        return encode_byte(len(data) + 2) + bytes([fid_type, fid_subtype]) + data
+
+    @staticmethod
+    def _info_string(value: str) -> bytes:
+        data = value.encode("utf-8") + b"\x00"
+        if len(data) > 64:
+            raise ValueError(f"Accessory info string too long: {value!r}")
+        return data
+
+    @staticmethod
+    def identify_token(lingo_ids: Iterable[int], options: int, device_id: int) -> bytes:
+        """Encode an IdentifyToken"""
+
+        lingoes = sorted({General.LINGO_ID, *lingo_ids})
+
+        return General.fid_token(
+            General.FID_IDENTIFY,
+            encode_byte(len(lingoes))
+            + bytes(lingoes)
+            + encode_int(options)
+            + encode_int(device_id),
+        )
+
+    @staticmethod
+    def accessory_tokens(info: AccessoryInfo) -> list[bytes]:
+        """Encode the AccessoryCapsToken and AccessoryInfoTokens describing the accessory"""
+
+        def info_token(info_type: int, data: bytes) -> bytes:
+            return General.fid_token(
+                General.FID_ACCESSORY_INFO, encode_byte(info_type) + data
+            )
+
+        tokens = [
+            General.fid_token(General.FID_ACCESSORY_CAPS, encode_long(info.capabilities)),
+            info_token(General.ACCESSORY_INFO_NAME, General._info_string(info.name)),
+            info_token(General.ACCESSORY_INFO_FIRMWARE_VERSION, bytes(info.firmware_version)),
+            info_token(General.ACCESSORY_INFO_HARDWARE_VERSION, bytes(info.hardware_version)),
+            info_token(
+                General.ACCESSORY_INFO_MANUFACTURER, General._info_string(info.manufacturer)
+            ),
+            info_token(
+                General.ACCESSORY_INFO_MODEL_NUMBER, General._info_string(info.model_number)
+            ),
+        ]
+
+        if info.serial_number is not None:
+            tokens.append(
+                info_token(
+                    General.ACCESSORY_INFO_SERIAL_NUMBER,
+                    General._info_string(info.serial_number),
+                )
+            )
+
+        tokens.append(
+            info_token(General.ACCESSORY_INFO_RF_CERTIFICATIONS, encode_int(info.rf_certifications))
+        )
+
+        return tokens
+
+    @staticmethod
+    def parse_fid_token_acks(data: bytes) -> list[FIDTokenAck]:
+        """Parse the acknowledgments of an AckFIDTokenValues response"""
+
+        if not data:
+            raise ValueError("Empty AckFIDTokenValues response")
+
+        acks = []
+        offset = 1
+
+        for _ in range(data[0]):
+            length = data[offset]
+            field = data[offset + 1 : offset + 1 + length]
+            if len(field) < 3:
+                raise ValueError(f"Malformed AckFIDTokenValues response: {data.hex(' ')}")
+
+            acks.append(FIDTokenAck(field[0], field[1], field[2], bytes(field[3:])))
+            offset += 1 + length
+
+        return acks
+
+    def set_fid_token_values(self, tokens: list[bytes]) -> list[FIDTokenAck]:
+        """
+        Send FID token-value fields, split across as few packets as the
+        transport's max payload size allows, and return their acknowledgments
+        """
+
+        # Lingo ID, command ID, transaction ID and token count
+        overhead = 5
+        max_size = self.iap.transport.max_payload_size - overhead
+
+        batches: list[list[bytes]] = [[]]
+        for token in tokens:
+            if len(token) > max_size:
+                raise ValueError(f"FID token too large for transport: {token.hex(' ')}")
+            if sum(map(len, batches[-1])) + len(token) > max_size:
+                batches.append([])
+            batches[-1].append(token)
+
+        acks = []
+        for batch in batches:
+            # The iPod must acknowledge each packet before the next is sent
+            response = self.request(
+                "SetFIDTokenValues",
+                encode_byte(len(batch)) + b"".join(batch),
+                response="RetFIDTokenValueACKs",
+            )
+            acks += self.parse_fid_token_acks(response.data)
+
+        return acks
+
+    def end_idps(self, status: int = 0) -> int:
+        """
+        End the IDPS process, returns the iPod's IDPS status (0: success,
+        authentication proceeds)
+
+        - status: accEndIDPSStatus, 0 to finish and continue with authentication
+        """
+
+        response = self.request(
+            "EndIDPS", encode_byte(status), response="IDPSStatus"
+        )
+
+        if not response.data:
+            raise ValueError("Empty IDPSStatus response")
+
+        return response.data[0]
+
+    def run_idps(
+        self,
+        lingo_ids: Iterable[int],
+        options: int,
+        device_id: int,
+        info: AccessoryInfo,
+    ) -> list[FIDTokenAck]:
+        """
+        Identify using the full IDPS process
+
+        StartIDPS, RequestTransportMaxPayloadSize, SetFIDTokenValues, EndIDPS.
+        Raises iAPAckError with status 0x04 if the iPod doesn't support IDPS.
+        """
+
+        self.start_idps()
+
+        transport = self.iap.transport
+        transport.max_payload_size = min(
+            transport.max_payload_size, self.request_transport_max_payload_size()
+        )
+
+        tokens = [self.identify_token(lingo_ids, options, device_id)]
+        tokens += self.accessory_tokens(info)
+
+        acks = self.set_fid_token_values(tokens)
+
+        for ack in acks:
+            if ack.status == FIDTokenStatus.ACCEPTED:
+                continue
+
+            required = ack.fid_type == 0x00 and ack.fid_subtype in self.FID_REQUIRED
+            if not required or ack.status in (
+                FIDTokenStatus.OPTIONAL_FAILED,
+                FIDTokenStatus.NOT_SUPPORTED,
+            ):
+                logger.warning("FID token %02X:%02X not accepted: %s", ack.fid_type, ack.fid_subtype, ack)
+                continue
+
+            # Abandon IDPS, the iPod would reject it anyway
+            self.send("EndIDPS", encode_byte(2))
+
+            if ack.status == FIDTokenStatus.LINGOES_BUSY:
+                raise iAPIdentificationError(
+                    f"Lingoes busy on another accessory: {ack.data.hex(' ')}"
+                )
+            if ack.status == FIDTokenStatus.MAXIMUM_CONNECTIONS:
+                raise iAPIdentificationError("Maximum number of accessory connections reached")
+
+            raise iAPIdentificationError(
+                f"Required FID token {ack.fid_type:02X}:{ack.fid_subtype:02X} rejected (status {ack.status})"
+            )
+
+        idps_status = self.end_idps(0)
+        if idps_status != 0:
+            raise iAPIdentificationError(f"IDPS failed with status {idps_status}")
+
+        return acks
 
     def identify(self, lingo: int | type | Lingo) -> None:
         """

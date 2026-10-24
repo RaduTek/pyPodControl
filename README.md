@@ -19,7 +19,7 @@ from pypodcontrol.lingo import SimpleRemote
 
 with iAPClient(UARTTransport("/dev/ttyUSB0")) as iap:
     sr = iap.register(SimpleRemote())
-    iap.general.identify(sr)
+    iap.start_identify()
 
     print(iap.general.request_ipod_name())
     sr.press_button("play_pause")
@@ -28,7 +28,10 @@ with iAPClient(UARTTransport("/dev/ttyUSB0")) as iap:
 -   `iAPClient` joins a transport with the registered lingos. The General lingo is always registered and available as `iap.general`. Other lingos are registered with `iap.register()`.
 -   Commands that expect a response block until the response arrives, raising `iAPTimeoutError` if none arrives in time, or `iAPAckError` if the iPod returns an error status.
 -   Unsolicited packets from the iPod can be handled with `lingo.add_listener(command, callback)`. Callbacks run on the transport's reader thread.
--   Pass `use_idps=True` together with an `AuthenticationProvider` (`auth=...`) to identify using IDPS. This enables transaction IDs.
+-   `iap.start_identify(authenticate, power_options)` identifies the accessory and all registered lingoes to the iPod. It uses `IdentifyDeviceLingoes` by default.
+    -   `authenticate=True` requests immediate authentication, and needs an `AuthenticationProvider` (`auth=...`).
+    -   `power_options` declares how much power the accessory draws from the iPod (`PowerOption.LOW_POWER`, `INTERMITTENT_HIGH_POWER` or `CONSTANT_HIGH_POWER`).
+-   Pass `use_idps=True` together with an `AuthenticationProvider` to identify using IDPS instead. This enables transaction IDs and sends the accessory information given as `accessory_info=AccessoryInfo(...)`. iPods that don't support IDPS fall back to `IdentifyDeviceLingoes`.
 
 ### Transports
 

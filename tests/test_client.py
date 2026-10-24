@@ -13,6 +13,10 @@ class DummyAuth(AuthenticationProvider):
     def protocol_version(self):
         return (2, 0)
 
+    @property
+    def device_id(self):
+        return 0x00000200
+
     def get_certificate(self):
         return b""
 

@@ -10,6 +10,10 @@ class iAPTimeoutError(iAPError, TimeoutError):
     """No response was received from the iPod within the timeout period"""
 
 
+class iAPIdentificationError(iAPError):
+    """Identification with the iPod failed"""
+
+
 class iAPAckError(iAPError):
     """iPod acknowledged a command with a non-success status"""
 
