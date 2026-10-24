@@ -76,6 +76,9 @@ class Transport(ABC):
 
         self._close()
 
+    def wake(self) -> None:
+        """Wake up a sleeping iPod, if the transport needs it"""
+
     def send(self, payload: bytes) -> None:
         """Send a packet with the given payload"""
 

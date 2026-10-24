@@ -1,19 +1,18 @@
 from typing import Final
 
-from .. import iAPClient
-from . import Lingo
+from .lingo import Lingo
 
 
 class ExtendedInterface(Lingo):
     """
     ### Extended Interface Lingo (0x04)
 
-    Request high power use from iPod
+    Advanced control of the iPod (database browsing, playback, track info)
     """
 
     LINGO_ID: Final = 0x04
 
-    commands = {
+    COMMANDS = {
         "ACK": 0x0001,
         "GetCurrentPlayingTrackChapterInfo": 0x0002,
         "ReturnCurrentPlayingTrackChapterInfo": 0x0003,
@@ -84,7 +83,6 @@ class ExtendedInterface(Lingo):
     }
     """Available commands"""
 
-    def __init__(self, iap: iAPClient) -> None:
-        """Create a new instance of ExtendedInterface"""
+    EXTENDED_COMMAND_IDS = True
 
-        super().__init__(iap)
+    ACK_COMMAND = "ACK"

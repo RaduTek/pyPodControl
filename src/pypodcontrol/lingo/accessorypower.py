@@ -1,7 +1,6 @@
 from typing import Final
 
-from .. import iAPClient
-from . import Lingo
+from .lingo import Lingo
 
 
 class AccessoryPower(Lingo):
@@ -13,18 +12,18 @@ class AccessoryPower(Lingo):
 
     LINGO_ID: Final = 0x05
 
-    commands = {
+    COMMANDS = {
         "BeginHighPower": 0x02,
         "EndHighPower": 0x03,
     }
     """Available commands"""
 
-    def __init__(self, iap: iAPClient) -> None:
-        """Create a new instance of AccessoryPower"""
-
-        super().__init__(iap)
-
     def begin_high_power(self) -> None:
         """Notify iPod that accessory may use high power (> 5mA)"""
 
-        self.send_command("BeginHighPower")
+        self.send("BeginHighPower")
+
+    def end_high_power(self) -> None:
+        """Notify iPod that accessory no longer uses high power"""
+
+        self.send("EndHighPower")

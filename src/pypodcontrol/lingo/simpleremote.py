@@ -1,8 +1,8 @@
 from typing import Final
 
-from .. import iAPClient
-from . import Lingo
 from time import sleep
+
+from .lingo import Lingo
 
 
 class SimpleRemote(Lingo):
@@ -14,7 +14,7 @@ class SimpleRemote(Lingo):
 
     LINGO_ID: Final = 0x02
 
-    commands = {
+    COMMANDS = {
         "ContextButtonStatus": 0x00,
         "ACK": 0x01,
         "ImageButtonStatus": 0x02,
@@ -56,13 +56,17 @@ class SimpleRemote(Lingo):
     ]
     """Available buttons, sorted in order of the bitmask"""
 
-    current_buttons = set()
+    ACK_COMMAND = "ACK"
+
+    current_buttons: set[str]
     """Currently pressed buttons"""
 
-    def __init__(self, iap: iAPClient) -> None:
+    def __init__(self) -> None:
         """Create a new instance of SimpleRemote"""
 
-        super().__init__(iap)
+        super().__init__()
+
+        self.current_buttons = set()
 
     @staticmethod
     def get_button_mask(button: str) -> int:
@@ -89,7 +93,7 @@ class SimpleRemote(Lingo):
         for button in self.current_buttons:
             mask |= SimpleRemote.get_button_mask(button)
 
-        self.send_command("ContextButtonStatus", SimpleRemote.encode_mask(mask))
+        self.send("ContextButtonStatus", SimpleRemote.encode_mask(mask))
 
     def get_button_state(self, button: str) -> bool:
         """Check if a button is pressed"""
