@@ -1,11 +1,12 @@
 import logging
+import queue
 import threading
 import time
 from concurrent.futures import Future
 from concurrent.futures import TimeoutError as FutureTimeoutError
 from dataclasses import dataclass, field
 from types import MappingProxyType
-from typing import Mapping, TypeVar
+from typing import Callable, Mapping, TypeVar
 
 from serial import Serial
 
@@ -95,6 +96,9 @@ class iAPClient:
 
         self._transaction_id = 0
         self._transaction_ids_enabled = False
+
+        self._events: queue.SimpleQueue[Callable[[], None] | None] = queue.SimpleQueue()
+        self._event_thread: threading.Thread | None = None
 
         self._general = self.register(General())
 
@@ -208,6 +212,11 @@ class iAPClient:
 
         logger.info("Opening %s", type(self.transport).__name__)
 
+        self._event_thread = threading.Thread(
+            target=self._run_events, name="iAP-events", daemon=True
+        )
+        self._event_thread.start()
+
         self.transport.set_receiver(self._on_payload)
         self.transport.open()
         self.transport.wake()
@@ -218,6 +227,13 @@ class iAPClient:
         self.transport.close()
         self.transport.set_receiver(None)
 
+        # Let the listeners finish the events already received
+        if self._event_thread is not None:
+            self._events.put(None)
+            if self._event_thread is not threading.current_thread():
+                self._event_thread.join()
+            self._event_thread = None
+
         with self._lock:
             pending, self._pending = self._pending, []
 
@@ -227,6 +243,55 @@ class iAPClient:
 
         for p in pending:
             p.future.set_exception(iAPError("Client closed"))
+
+    def wait_until_closed(self, timeout: float | None = None) -> bool:
+        """
+        Block until the client is closed or the iPod disconnects, returns
+        whether it closed (False on timeout)
+
+        Use this in event driven scripts to keep the main thread alive while
+        listeners handle the iPod's notifications. Ctrl+C interrupts the wait
+        with KeyboardInterrupt.
+
+        - timeout: How long to wait, in seconds, None to wait indefinitely
+        """
+
+        deadline = None if timeout is None else time.monotonic() + timeout
+
+        # Wait in short steps, so KeyboardInterrupt is delivered promptly
+        while True:
+            step = 0.5 if deadline is None else min(0.5, deadline - time.monotonic())
+            if step <= 0:
+                return False
+            if self.transport.wait_closed(step):
+                return True
+
+    def dispatch(self, callback: Callable[[], None]) -> None:
+        """
+        Run a callback on the client's event thread
+
+        Listeners run on this thread, in the order the iPod's packets were
+        received. Unlike the transport's reader thread, it may block and send
+        requests to the iPod.
+        """
+
+        if self._event_thread is None:
+            raise iAPError("Client is not open")
+
+        self._events.put(callback)
+
+    def _run_events(self) -> None:
+        """Event thread, runs dispatched callbacks until close()"""
+
+        while True:
+            callback = self._events.get()
+            if callback is None:
+                return
+
+            try:
+                callback()
+            except Exception:
+                logger.exception("Event callback failed")
 
     def __enter__(self) -> "iAPClient":
         self.open()

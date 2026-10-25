@@ -244,3 +244,50 @@ def test_close_fails_pending(transport):
     t.join(1)
 
     assert errors and not isinstance(errors[0], iAPTimeoutError)
+
+
+def test_listeners_can_send_requests(client, transport):
+    ei = client.register(ExtendedInterface)
+    names = []
+    done = threading.Event()
+
+    def listener(packet):
+        # Runs on the event thread, so the reader thread is free to deliver the response
+        names.append(client.general.request_ipod_name())
+        done.set()
+
+    def on_send(payload):
+        if payload[:2] == b"\x00\x07":
+            transport.inject(b"\x00\x08iPod\x00")
+
+    transport.on_send = on_send
+    ei.add_listener("PlayStatusChangeNotification", listener)
+    transport.inject(bytes.fromhex("04 00 27 01 00 00 00 05"))
+
+    assert done.wait(2)
+    assert names == ["iPod"]
+
+
+def test_listeners_run_in_order(client, transport):
+    ei = client.register(ExtendedInterface)
+    received = []
+    done = threading.Event()
+
+    def listener(packet):
+        received.append(packet.data[-1])
+        if len(received) == 5:
+            done.set()
+
+    ei.add_listener("PlayStatusChangeNotification", listener)
+    for i in range(5):
+        transport.inject(bytes([0x04, 0x00, 0x27, 0x01, 0x00, 0x00, 0x00, i]))
+
+    assert done.wait(1)
+    assert received == [0, 1, 2, 3, 4]
+
+
+def test_wait_until_closed(client):
+    assert not client.wait_until_closed(0.1)
+
+    threading.Timer(0.1, client.close).start()
+    assert client.wait_until_closed(2)

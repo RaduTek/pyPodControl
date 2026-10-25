@@ -80,6 +80,17 @@ class ExtendedInterface(Lingo):
         "RetDBTrackInfo": 0x0041,
         "GetPBTrackInfo": 0x0042,
         "RetPBTrackInfo": 0x0043,
+        "CreateGeniusPlaylist": 0x0044,
+        "RefreshGeniusPlaylist": 0x0045,
+        "IsGeniusAvailableForTrack": 0x0047,
+        "GetPlaylistInfo": 0x0048,
+        "RetPlaylistInfo": 0x0049,
+        "PrepareUIDList": 0x004A,
+        "PlayPreparedUIDList": 0x004B,
+        "GetArtworkTimes": 0x004C,
+        "RetArtworkTimes": 0x004D,
+        "GetArtworkData": 0x004E,
+        "RetArtworkData": 0x004F,
     }
     """Available commands"""
 

@@ -179,7 +179,12 @@ class Lingo:
         return packet.data[0], int.from_bytes(packet.data[1 : 1 + width], "big")
 
     def add_listener(self, command: str | int, listener: Listener) -> None:
-        """Call listener whenever the iPod sends the given command unsolicited"""
+        """
+        Call listener whenever the iPod sends the given command unsolicited
+
+        Listeners run on the client's event thread (see iAPClient.dispatch()),
+        so they may block and send requests to the iPod.
+        """
 
         self._listeners.setdefault(self.command_id(command), []).append(listener)
 
@@ -205,18 +210,25 @@ class Lingo:
             )
 
     def notify_listeners(self, packet: Packet) -> bool:
-        """Call the listeners of the packet's command, returns whether it has any"""
+        """
+        Call the listeners of the packet's command on the client's event
+        thread, returns whether it has any
+        """
 
-        listeners = self._listeners.get(packet.command_id, [])
+        listeners = list(self._listeners.get(packet.command_id, []))
 
-        for listener in list(listeners):
-            try:
-                listener(packet)
-            except Exception:
-                logger.exception(
-                    "%s: listener for %s failed",
-                    type(self).__name__,
-                    self.command_name(packet.command_id),
-                )
+        def run() -> None:
+            for listener in listeners:
+                try:
+                    listener(packet)
+                except Exception:
+                    logger.exception(
+                        "%s: listener for %s failed",
+                        type(self).__name__,
+                        self.command_name(packet.command_id),
+                    )
+
+        if listeners:
+            self.iap.dispatch(run)
 
         return bool(listeners)

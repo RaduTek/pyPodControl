@@ -20,8 +20,23 @@ class SimpleRemote(Lingo):
         "ImageButtonStatus": 0x02,
         "VideoButtonStatus": 0x03,
         "AudioButtonStatus": 0x04,
+        "iPodOutButtonStatus": 0x0B,
+        "RotationInputStatus": 0x0C,
         "RadioButtonStatus": 0x0D,
         "CameraButtonStatus": 0x0E,
+        "RegisterDescriptor": 0x0F,
+        "iPodHIDReport": 0x10,
+        "AccessoryHIDReport": 0x11,
+        "UnregisterDescriptor": 0x12,
+        "VoiceOverEvent": 0x13,
+        "GetVoiceOverParameter": 0x14,
+        "RetVoiceOverParameter": 0x15,
+        "SetVoiceOverParameter": 0x16,
+        "GetCurrentVoiceOverItemProperty": 0x17,
+        "RetCurrentVoiceOverItemProperty": 0x18,
+        "SetVoiceOverContext": 0x19,
+        "VoiceOverParameterChanged": 0x1A,
+        "AccessoryAck": 0x81,
     }
     """Available commands"""
 

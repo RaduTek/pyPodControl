@@ -35,6 +35,8 @@ class Transport(ABC):
         self._write_lock = threading.Lock()
         self._reader: threading.Thread | None = None
         self._running = threading.Event()
+        self._closed = threading.Event()
+        self._closed.set()
 
     @property
     def is_open(self) -> bool:
@@ -55,6 +57,7 @@ class Transport(ABC):
 
         self._open()
         self.parser.reset()
+        self._closed.clear()
         self._running.set()
 
         self._reader = threading.Thread(
@@ -74,7 +77,18 @@ class Transport(ABC):
             self._reader.join()
         self._reader = None
 
-        self._close()
+        try:
+            self._close()
+        finally:
+            self._closed.set()
+
+    def wait_closed(self, timeout: float | None = None) -> bool:
+        """
+        Wait until the transport is closed, by close() or because the link
+        failed (e.g. the iPod was unplugged), returns whether it is closed
+        """
+
+        return self._closed.wait(timeout)
 
     def wake(self) -> None:
         """Wake up a sleeping iPod, if the transport needs it"""
@@ -115,6 +129,7 @@ class Transport(ABC):
                     logger.exception("Transport read failed, stopping reader")
                     self._running.clear()
                     self._safe_close()
+                    self._closed.set()
                 break
 
             if not chunk:

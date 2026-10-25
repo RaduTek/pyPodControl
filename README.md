@@ -27,11 +27,45 @@ with iAPClient(UARTTransport("/dev/ttyUSB0")) as iap:
 
 -   `iAPClient` joins a transport with the registered lingos. The General lingo is always registered and available as `iap.general`. Other lingos are registered with `iap.register()`.
 -   Commands that expect a response block until the response arrives, raising `iAPTimeoutError` if none arrives in time, or `iAPAckError` if the iPod returns an error status.
--   Unsolicited packets from the iPod can be handled with `lingo.add_listener(command, callback)`. Callbacks run on the transport's reader thread.
+-   Unsolicited packets from the iPod can be handled with `lingo.add_listener(command, callback)`. Callbacks run on the client's event thread, see [Event driven scripts](#event-driven-scripts).
 -   `iap.start_identify(authenticate, power_options)` identifies the accessory and all registered lingoes to the iPod. It uses `IdentifyDeviceLingoes` by default.
     -   `authenticate=True` requests immediate authentication, and needs an `AuthenticationProvider` (`auth=...`).
     -   `power_options` declares how much power the accessory draws from the iPod (`PowerOption.LOW_POWER`, `INTERMITTENT_HIGH_POWER` or `CONSTANT_HIGH_POWER`).
 -   Pass `use_idps=True` together with an `AuthenticationProvider` to identify using IDPS instead. This enables transaction IDs and sends the accessory information given as `accessory_info=AccessoryInfo(...)`. iPods that don't support IDPS fall back to `IdentifyDeviceLingoes`.
+
+### Event driven scripts
+
+A script can set up listeners, enable the iPod's notifications and then wait for events. For example, with the Display Remote lingo:
+
+```python
+from pypodcontrol import iAPClient
+from pypodcontrol.lingo import DisplayRemote, RemoteEvent, TrackInfoType
+
+with iAPClient(transport, auth=auth) as iap:
+    dr = iap.register(DisplayRemote)
+    iap.start_identify()
+
+    def on_track(event, index):
+        print("Now playing:", dr.get_track_text(TrackInfoType.TITLE, index))
+
+    def on_volume(event, volume):
+        print("Volume:", "muted" if volume.muted else volume.ui_level)
+
+    dr.add_event_listener(RemoteEvent.TRACK_INDEX, on_track)
+    dr.add_event_listener(RemoteEvent.ABSOLUTE_VOLUME, on_volume)
+    dr.set_remote_event_notification([RemoteEvent.TRACK_INDEX, RemoteEvent.ABSOLUTE_VOLUME])
+
+    try:
+        iap.wait_until_closed()  # until the iPod disconnects
+    except KeyboardInterrupt:
+        pass
+```
+
+-   `iap.wait_until_closed(timeout=None)` blocks until the client is closed or the iPod disconnects, and can be interrupted with Ctrl+C.
+-   Listeners run on the client's event thread, one at a time, in the order the iPod sent the packets. They can send requests to the iPod (like `get_track_text` above), but a slow listener delays the events after it.
+-   `iap.dispatch(callback)` runs any callback on the event thread, e.g. to serialize work with the listeners.
+
+See `examples/displayremote.py` for a complete script.
 
 ### Authentication
 
