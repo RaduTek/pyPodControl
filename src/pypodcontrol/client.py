@@ -238,6 +238,17 @@ class iAPClient:
     def close(self) -> None:
         """Close the transport, failing any pending requests"""
 
+        # Let each lingo notify the iPod of its departure and release
+        # per-connection state while the transport is still open. Best-effort:
+        # the iPod may have already disconnected (sends then fail at once), and
+        # listeners may still be running, so lingo.close() must tolerate send
+        # failures and be thread-safe.
+        for lingo in self._lingos.values():
+            try:
+                lingo.close()
+            except Exception:
+                logger.exception("%s: close() failed", type(lingo).__name__)
+
         self.transport.close()
         self.transport.set_receiver(None)
 
@@ -261,14 +272,6 @@ class iAPClient:
 
         for c in collectors:
             c.packets.put(iAPError("Client closed"))
-
-        # Let each lingo release per-connection state (after the event thread
-        # has stopped, so no listener runs concurrently)
-        for lingo in self._lingos.values():
-            try:
-                lingo.close()
-            except Exception:
-                logger.exception("%s: close() failed", type(lingo).__name__)
 
     def wait_until_closed(self, timeout: float | None = None) -> bool:
         """

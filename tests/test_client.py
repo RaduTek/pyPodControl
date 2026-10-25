@@ -286,6 +286,40 @@ def test_listeners_run_in_order(client, transport):
     assert received == [0, 1, 2, 3, 4]
 
 
+def test_lingo_close_called_on_client_close(transport):
+    closed = []
+
+    class Departing(Lingo):
+        LINGO_ID = 0x7E
+
+        def close(self):
+            closed.append(self.is_registered)
+
+    iap = iAPClient(transport, timeout=0.5)
+    iap.open()
+    iap.register(Departing)
+    iap.close()
+
+    # close() ran once, before the lingo was unbound
+    assert closed == [True]
+
+
+def test_lingo_can_notify_ipod_on_close(transport):
+    class Departing(Lingo):
+        LINGO_ID = 0x7E
+
+        def close(self):
+            # The transport is still open here, so a parting command goes out
+            self.iap.send_packet(self, 0x01, b"\xaa")
+
+    iap = iAPClient(transport, timeout=0.5)
+    iap.open()
+    iap.register(Departing)
+    iap.close()
+
+    assert transport.next_sent() == bytes([0x7E, 0x01, 0xAA])
+
+
 def test_wait_until_closed(client):
     assert not client.wait_until_closed(0.1)
 

@@ -93,12 +93,15 @@ class Lingo:
 
     def close(self) -> None:
         """
-        Release per-connection resources
+        Notify the iPod of the lingo's departure and release per-connection state
 
         Called by iAPClient.close() for every registered lingo, and by
-        unregister() before the lingo is unbound. The transport is already
-        closed, so this must not send to the iPod; override it to reset state
-        held across a connection. The default does nothing.
+        unregister() before the lingo is unbound, while the transport is still
+        open, so an override may send a parting command to the iPod (e.g. leave
+        a mode it entered). It is best-effort: the iPod may have already
+        disconnected (sends then raise TransportError at once), and listeners
+        may still be running, so keep it quick and thread-safe. The default
+        does nothing.
         """
 
     @classmethod
