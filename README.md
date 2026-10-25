@@ -179,6 +179,43 @@ The driver only controls fast charging of iPhones and iPads, so the workaround i
 echo "blacklist apple_mfi_fastcharge" | sudo tee /etc/modprobe.d/no-apple-mfi-fastcharge.conf
 ```
 
+### Digital audio over USB
+
+In its iPod USB Interface configuration the iPod also exposes a USB audio class device, and streams its audio to the host as full-scale PCM. The **Digital Audio lingo** (0x0A) sets this up: the iPod asks the accessory for its sample rate capabilities and notifies the sample rate of each track. Registering `DigitalAudio` advertises the lingo during identification, so the iPod starts routing audio to USB (it still requires authentication, like the other examples).
+
+The PCM itself is carried by the USB audio device, not by iAP, so on Linux it appears as an audio capture source (via `snd-usb-audio`) that has to be routed to an output. Because digital audio is emitted at full scale — the iPod's volume wheel does not attenuate it — the accessory is expected to apply the volume. `pypodcontrol.audio` does both:
+
+```python
+from pypodcontrol import iAPClient
+from pypodcontrol.audio import create_audio_router
+from pypodcontrol.lingo import DigitalAudio, DisplayRemote, RemoteEvent
+
+with iAPClient(transport, auth=auth) as iap:
+    da = iap.register(DigitalAudio)
+    dr = iap.register(DisplayRemote)
+    iap.start_identify()
+
+    router = create_audio_router()      # PipeWire by default
+    router.start()                      # waits for the iPod's source, links it to the output
+
+    def on_volume(event, volume):
+        router.set_muted(volume.muted)
+        router.set_volume(0.0 if volume.muted else volume.ui_level / 255)
+
+    dr.add_event_listener(RemoteEvent.ABSOLUTE_VOLUME, on_volume)
+    dr.set_remote_event_notification([RemoteEvent.ABSOLUTE_VOLUME])
+
+    iap.wait_until_closed()
+    router.stop()
+```
+
+-   `create_audio_router(backend="auto")` picks a backend: `"pipewire"` uses PipeWire's command line tools (`pw-dump`, `pw-link`, `wpctl`) and needs no extra Python dependency; `"jack"` uses the JACK-Client package (`pip install pyPodControl[audio]`) and a running JACK server. `"auto"` prefers PipeWire.
+-   `router.start(target=None)` waits for the iPod's audio source to appear (it only does once a track is playing), then routes it to `target` or the default output. `set_volume(0.0–1.0)` applies the gain and `set_muted()` mutes; drive them from the volume the iPod reports over the Display Remote lingo.
+-   `router.set_rate(hz)` matches the output to the iPod's sample rate. The iPod streams digital audio **only** at the rate it negotiates over the Digital Audio lingo (`TrackNewAudioAttributes`, usually 44100 Hz); if the USB audio interface is opened at a different rate the iPod stalls (playback clock frozen, no audio) even though its descriptor lists other rates. Drive it from `DigitalAudio.add_track_attributes_listener()`, as the example does. On PipeWire this pins the graph clock to that rate while routing and restores automatic selection on `stop()`; with JACK, start the server at that rate.
+-   This is Linux-only and needs the USB transport; UART cannot carry audio.
+
+See `examples/digitalaudio.py` for a complete script.
+
 ### Logging
 
 pyPodControl logs through the standard `logging` module, under the `pypodcontrol` logger. Every packet sent to and received from the iPod is logged at DEBUG level to the `pypodcontrol.traffic` logger, with lingo and command names, transaction IDs and decoded ACKs:

@@ -1,4 +1,5 @@
 from .errors import (
+    AudioError,
     TransportError,
     iAPAckError,
     iAPError,
@@ -9,4 +10,4 @@ from .packet import Packet
 from .lingo.general import AccessoryInfo, PowerOption
 from .client import iAPClient
 from .debug import TRAFFIC_LOGGER, enable_logging
-from . import auth, image, lingo, transport
+from . import audio, auth, image, lingo, transport

@@ -14,6 +14,10 @@ class iAPIdentificationError(iAPError):
     """Identification with the iPod failed"""
 
 
+class AudioError(iAPError):
+    """Routing the iPod's digital audio failed (missing backend, no source, ...)"""
+
+
 class iAPAckError(iAPError):
     """iPod acknowledged a command with a non-success status"""
 

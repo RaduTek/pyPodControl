@@ -14,6 +14,7 @@ dependencies = [
 [project.optional-dependencies]
 usb = ["hidapi>=0.14", "pyusb>=1.2"]
 image = ["Pillow>=10"]
+audio = ["JACK-Client>=0.5"]
 dev = ["pytest", "Pillow>=10"]
 
 [project.urls]

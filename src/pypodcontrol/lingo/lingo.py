@@ -91,6 +91,16 @@ class Lingo:
 
         self._client = None
 
+    def close(self) -> None:
+        """
+        Release per-connection resources
+
+        Called by iAPClient.close() for every registered lingo, and by
+        unregister() before the lingo is unbound. The transport is already
+        closed, so this must not send to the iPod; override it to reset state
+        held across a connection. The default does nothing.
+        """
+
     @classmethod
     def command_id(cls, command: str | int) -> int:
         """Get the ID of given command"""

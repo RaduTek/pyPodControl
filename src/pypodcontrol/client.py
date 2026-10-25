@@ -201,6 +201,7 @@ class iAPClient:
 
         instance = self._lingos.pop(lingo_id, None)
         if instance is not None:
+            instance.close()
             instance._unbind()
 
     def get(self, lingo: type[L] | int) -> L | None:
@@ -260,6 +261,14 @@ class iAPClient:
 
         for c in collectors:
             c.packets.put(iAPError("Client closed"))
+
+        # Let each lingo release per-connection state (after the event thread
+        # has stopped, so no listener runs concurrently)
+        for lingo in self._lingos.values():
+            try:
+                lingo.close()
+            except Exception:
+                logger.exception("%s: close() failed", type(lingo).__name__)
 
     def wait_until_closed(self, timeout: float | None = None) -> bool:
         """

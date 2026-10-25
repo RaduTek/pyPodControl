@@ -37,7 +37,7 @@ from .usbhostmode import USBHostMode
 from .rftuner import RFTuner
 from .accessoryequalizer import AccessoryEqualizer
 from .sports import Sports
-from .digitalaudio import DigitalAudio
+from .digitalaudio import DigitalAudio, TrackAttributes
 from .storage import Storage
 from .ipodout import iPodOut
 from .location import Location
