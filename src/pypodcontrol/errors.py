@@ -27,4 +27,12 @@ class iAPAckError(iAPError):
         self.status = status
         self.command = command
 
-        super().__init__(f"{command} failed with ACK status 0x{status:02X}")
+        # Imported lazily to avoid a circular import (general imports from here)
+        from .lingo.general import General
+
+        description = General.ACK_STATUSES.get(status)
+        suffix = f" ({description})" if description is not None else ""
+
+        super().__init__(
+            f"{command} failed with ACK status 0x{status:02X}{suffix}"
+        )
