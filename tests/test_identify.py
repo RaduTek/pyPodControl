@@ -9,6 +9,7 @@ from pypodcontrol import (
     PowerOption,
     iAPAckError,
     iAPClient,
+    iAPError,
     iAPIdentificationError,
 )
 from pypodcontrol.lingo import ExtendedInterface, General, SimpleRemote
@@ -49,6 +50,33 @@ def test_identify_device_lingoes_with_auth():
     assert ipod.received[0] == bytes.fromhex(
         "00 13" "00 00 00 01" "00 00 00 02" "00 00 02 00"
     )
+
+
+def test_reset_lingoes(transport_with_ack):
+    transport, iap = transport_with_ack
+    iap.register(SimpleRemote)
+    iap.register(ExtendedInterface)
+    iap.start_identify()
+    transport.next_sent()  # the initial IdentifyDeviceLingoes
+
+    iap.general.reset_lingoes()
+
+    # Re-identifies declaring only the General lingo (mask 0x00000001)
+    assert transport.next_sent() == bytes.fromhex(
+        "00 13" "00 00 00 01" "00 00 00 00" "00 00 00 00"
+    )
+    # Only the General lingo remains registered
+    assert set(iap.lingos) == {General.LINGO_ID}
+    assert SimpleRemote not in iap
+    assert ExtendedInterface not in iap
+
+
+def test_reset_lingoes_rejected_for_idps(transport_with_ack):
+    _, iap = transport_with_ack
+    iap.transaction_ids_enabled = True  # as after an IDPS identification
+
+    with pytest.raises(iAPError, match="IdentifyDeviceLingoes"):
+        iap.general.reset_lingoes()
 
 
 def test_authenticate_requires_provider(transport_with_ack):

@@ -32,6 +32,7 @@ with iAPClient(UARTTransport("/dev/ttyUSB0")) as iap:
     -   `authenticate=True` requests immediate authentication, and needs an `AuthenticationProvider` (`auth=...`).
     -   `power_options` declares how much power the accessory draws from the iPod (`PowerOption.LOW_POWER`, `INTERMITTENT_HIGH_POWER` or `CONSTANT_HIGH_POWER`).
 -   Pass `use_idps=True` together with an `AuthenticationProvider` to identify using IDPS instead. This enables transaction IDs and sends the accessory information given as `accessory_info=AccessoryInfo(...)`. iPods that don't support IDPS fall back to `IdentifyDeviceLingoes`.
+-   `iap.general.reset_lingoes()` returns the iPod to only the General lingo without reconnecting: it unregisters the other lingoes and re-identifies declaring just General, so the interface is ready for a fresh `start_identify()`. Only valid for `IdentifyDeviceLingoes` sessions, not IDPS.
 
 ### Event driven scripts
 

@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from enum import IntEnum
 from typing import Final, Iterable
 
-from ..errors import iAPAckError, iAPIdentificationError
+from ..errors import iAPAckError, iAPError, iAPIdentificationError
 from ..packet import Packet, encode_byte, encode_int, encode_long, encode_short
 from .lingo import Lingo
 
@@ -558,6 +558,35 @@ class General(Lingo):
             + encode_int(options)
             + encode_int(device_id),
         )
+
+    def reset_lingoes(self) -> None:
+        """
+        Reset the iPod to only the General lingo, without reconnecting
+
+        Unregisters every other lingo from the client (so each one's close()
+        can still notify the iPod) and re-identifies with IdentifyDeviceLingoes
+        declaring only the General lingo. The iPod forgets the lingoes the
+        accessory had identified, leaving the interface ready for a fresh
+        start_identify() without physically reconnecting the iPod.
+
+        Only valid for sessions identified with IdentifyDeviceLingoes. IDPS
+        declares its lingoes through FID tokens and has no such reset, so this
+        raises iAPError when transaction IDs are enabled (i.e. after IDPS).
+        """
+
+        if self.iap.transaction_ids_enabled:
+            raise iAPError(
+                "reset_lingoes() is only valid for IdentifyDeviceLingoes sessions, not IDPS"
+            )
+
+        # Drop the other lingoes while the iPod still has them identified, so
+        # their close() parting commands are still accepted
+        for lingo_id in list(self.iap.lingos):
+            if lingo_id != General.LINGO_ID:
+                self.iap.unregister(lingo_id)
+
+        logger.info("Resetting the iPod to only the General lingo")
+        self.identify_device_lingoes([])
 
     def start_idps(self) -> None:
         """Start the IDPS process, raises iAPAckError if the iPod refuses it"""
