@@ -67,6 +67,46 @@ with iAPClient(transport, auth=auth) as iap:
 
 See `examples/displayremote.py` for a complete script.
 
+### Extended Interface
+
+The Extended Interface lingo browses the iPod's database and controls playback. The iPod has to be put in Extended Interface mode first, which shows an "OK to disconnect" screen and disables its buttons:
+
+```python
+from pypodcontrol import iAPClient
+from pypodcontrol.lingo import DBCategory, ExtendedInterface, PlayStatusChange, PlayStatusEvent
+
+with iAPClient(transport, auth=auth) as iap:
+    ei = iap.register(ExtendedInterface)
+    iap.start_identify()
+    ei.enter_extended_mode()
+
+    # Selections narrow each other: an artist, then one of their albums
+    ei.reset_db_selection()
+    ei.get_number_categorized_db_records(DBCategory.ARTIST)  # required before selecting
+    print(ei.retrieve_categorized_database_records(DBCategory.ARTIST, 0, 10))
+    ei.select_db_record(DBCategory.ARTIST, 0)
+
+    ei.get_number_categorized_db_records(DBCategory.ALBUM)
+    ei.select_db_record(DBCategory.ALBUM, 0)
+
+    # Selecting a single track starts playing it
+    ei.get_number_categorized_db_records(DBCategory.TRACK)
+    ei.select_db_record(DBCategory.TRACK, 0)
+
+    def on_track(change, index):
+        print("Now playing:", ei.get_indexed_playing_track_title(index))
+
+    ei.add_event_listener(PlayStatusChange.TRACK_INDEX, on_track)
+    ei.set_play_status_change_notification([PlayStatusEvent.TRACK_INDEX])
+    ...
+    ei.exit_extended_mode()
+```
+
+-   Commands answered with several packets (database records, `get_db_track_info()`, artwork) gather them until all are received, or until the iPod stops sending for `idle_timeout` seconds when their number isn't known up front.
+-   Artwork is returned as an `Artwork` with the raw pixel data. With Pillow installed (`pip install pyPodControl[image]`), `artwork.to_image()` converts it to a `PIL.Image`, which other libraries can use: `pygame.image.frombytes(img.tobytes(), img.size, img.mode)` for pygame, or `PIL.ImageQt.ImageQt(img)` for Qt. `ei.set_display_image(img)` sends a Pillow image to the iPod's screen.
+
+See `examples/extendedinterface.py` for a terminal UI that browses the library and controls playback (it needs `windows-curses` on Windows).
+
 ### Authentication
 
 Authenticated lingoes and commands require Made-for-iPod authentication, which normally needs an Apple authentication coprocessor. iPods running firmware that bypasses the signature check (such as [RepriseOS](https://github.com/RaduTek/repriseos-lab) on the iPod Classic) accept any signature, so `BypassedAuthenticationProvider` can authenticate without a coprocessor:
@@ -100,24 +140,38 @@ transport = USBHIDTransport(select_configuration=True)
 
 This uses pyusb, and it refuses to switch while the iPod's disk is mounted, since switching disconnects the disk. Eject the iPod first. `select_iui_configuration()` in `pypodcontrol.transport` does the same switch on its own.
 
-On Linux, the user running the code needs access to the iPod's USB device and its hidraw node, for example with a udev rule in `/etc/udev/rules.d/70-ipod.rules`:
+#### Linux: USB permissions
+
+The user running the code needs access to the iPod's USB device node (`/dev/bus/usb/...`, used by hidapi's default libusb backend and by pyusb) and its hidraw node. Install the udev rules from `extras/linux/70-ipod.rules`:
 
 ```
-SUBSYSTEM=="usb", ATTR{idVendor}=="05ac", ATTR{idProduct}=="12??", MODE="0660", TAG+="uaccess"
-KERNEL=="hidraw*", ATTRS{idVendor}=="05ac", ATTRS{idProduct}=="12??", MODE="0660", TAG+="uaccess"
+sudo cp extras/linux/70-ipod.rules /etc/udev/rules.d/
+sudo udevadm control --reload && sudo udevadm trigger
 ```
 
-Alternatively, udev can always switch iPods to the iUI configuration as soon as they are connected. This makes their disks unavailable:
+The rules grant access with `uaccess` to the user logged in at the computer, and to the `plugdev` group. `uaccess` only applies to a local desktop session, not to SSH or headless sessions such as on a Raspberry Pi, so there the user must be in `plugdev` (`sudo usermod -aG plugdev $USER`, then log in again). Raspberry Pi OS's default user already is.
+
+#### Linux: always use the iUI configuration
+
+The kernel configures a USB device as it enumerates it, before udev sees it, and picks the iPod's mass storage configuration. A udev rule that switches to the iUI configuration (commented out in `70-ipod.rules`) works, but the iPod is briefly put in mass storage mode first, which stops playback and shows its disk mode screen.
+
+The `ipod-iui` kernel module in `extras/linux/ipod-iui` avoids this: it makes the kernel choose the iUI configuration in the first place. It needs Linux 6.8 or newer and the kernel headers (`raspberrypi-kernel-headers` on Raspberry Pi OS, `kernel-devel` on Fedora). It also conflicts with `apple-mfi-fastcharge`, which has to be blacklisted, see below.
 
 ```
-SUBSYSTEM=="usb", ATTR{idVendor}=="05ac", ATTR{idProduct}=="12??", ATTR{bConfigurationValue}="2"
+cd extras/linux/ipod-iui
+make
+sudo make install
+echo ipod_iui | sudo tee /etc/modules-load.d/ipod-iui.conf
+sudo modprobe ipod_iui
 ```
 
-Letting udev do the switch means `pyusb` is not needed, so `USBHIDTransport(select_configuration=False)` is enough.
+The module must be loaded before the iPod is plugged in (`modules-load.d` loads it at boot). An iPod that is already connected when it loads is switched to the iUI configuration. To keep the module working across kernel updates, install it with DKMS instead: `sudo dkms add ./extras/linux/ipod-iui && sudo dkms install ipod-iui/1.0`. On systems with Secure Boot, the module must be signed. While it is loaded, iPod disks are unavailable; `sudo modprobe -r ipod_iui` and replugging brings them back.
+
+With either the module or the udev rule, `pyusb` is not needed, so `USBHIDTransport(select_configuration=False)` is enough.
 
 #### Linux: USB stops working after unplugging an iPod
 
-On Linux, unplugging an iPod while it is in the iUI configuration can crash the kernel's `apple-mfi-fastcharge` driver (a NULL pointer dereference in `mfi_fc_disconnect`, visible in `journalctl -k`). The crash happens in the USB hub worker, so afterwards new USB devices are no longer detected and shutting down hangs until the machine is forcibly powered off. This is a kernel bug, independent of pyPodControl: `snd-usb-audio`, which binds to the iUI configuration's audio interfaces, overwrites the device data `apple-mfi-fastcharge` relies on. It happens however the configuration is switched, including with the udev rule above.
+On Linux, unplugging an iPod while it is in the iUI configuration can crash the kernel's `apple-mfi-fastcharge` driver (a NULL pointer dereference in `mfi_fc_disconnect`, visible in `journalctl -k`). The crash happens in the USB hub worker, so afterwards new USB devices are no longer detected and shutting down hangs until the machine is forcibly powered off. This is a kernel bug, independent of pyPodControl: `snd-usb-audio`, which binds to the iUI configuration's audio interfaces, overwrites the device data `apple-mfi-fastcharge` relies on. It happens however the configuration is switched, including with the udev rule and the `ipod-iui` module above.
 
 The driver only controls fast charging of iPhones and iPads, so the workaround is to blacklist it and reboot:
 

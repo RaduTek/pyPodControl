@@ -13,7 +13,8 @@ dependencies = [
 
 [project.optional-dependencies]
 usb = ["hidapi>=0.14", "pyusb>=1.2"]
-dev = ["pytest"]
+image = ["Pillow>=10"]
+dev = ["pytest", "Pillow>=10"]
 
 [project.urls]
 Homepage = "https://github.com/RaduTek/pyPodControl"

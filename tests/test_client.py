@@ -291,3 +291,77 @@ def test_wait_until_closed(client):
 
     threading.Timer(0.1, client.close).start()
     assert client.wait_until_closed(2)
+
+
+def test_request_explicit_transaction_id(transport):
+    with iAPClient(transport, timeout=0.5) as iap:
+        iap.transaction_ids_enabled = True
+        reply_with(transport, bytes.fromhex("00 08 12 34") + b"iPod\x00")
+        iap.general.request("RequestiPodName", response="ReturniPodName", transaction_id=0x1234)
+
+        assert transport.next_sent() == bytes.fromhex("00 07 12 34")
+
+
+def test_request_multiple_done_callback(client, transport):
+    ei = client.register(ExtendedInterface)
+    reply_with(transport, *[bytes([0x04, 0x00, 0x1B, 0, 0, 0, i]) for i in range(4)])
+
+    packets = ei.request_multiple(
+        "RetrieveCategorizedDatabaseRecords",
+        response="ReturnCategorizedDatabaseRecord",
+        done=lambda packets: len(packets) == 2,
+    )
+
+    assert [p.data[-1] for p in packets] == [0, 1]
+
+
+def test_request_multiple_ends_on_success_ack(client, transport):
+    ei = client.register(ExtendedInterface)
+    reply_with(transport, bytes.fromhex("04 00 1b 00 00 00 00"), bytes.fromhex("04 00 01 00 00 1a"))
+
+    packets = ei.request_multiple(
+        "RetrieveCategorizedDatabaseRecords",
+        response="ReturnCategorizedDatabaseRecord",
+        idle_timeout=5,
+    )
+
+    assert len(packets) == 1
+
+
+def test_request_multiple_idle_timeout(client, transport):
+    ei = client.register(ExtendedInterface)
+    reply_with(transport, bytes.fromhex("04 00 1b 00 00 00 00"))
+
+    packets = ei.request_multiple(
+        "RetrieveCategorizedDatabaseRecords",
+        response="ReturnCategorizedDatabaseRecord",
+        idle_timeout=0.05,
+    )
+
+    assert len(packets) == 1
+
+
+def test_request_multiple_error_ack(client, transport):
+    ei = client.register(ExtendedInterface)
+    reply_with(transport, bytes.fromhex("04 00 01 04 00 1a"))
+
+    with pytest.raises(iAPAckError) as e:
+        ei.request_multiple("RetrieveCategorizedDatabaseRecords", response="ReturnCategorizedDatabaseRecord")
+
+    assert e.value.status == 0x04
+
+
+def test_request_multiple_other_packets_reach_listeners(client, transport):
+    ei = client.register(ExtendedInterface)
+    notified = threading.Event()
+    ei.add_listener("PlayStatusChangeNotification", lambda packet: notified.set())
+    reply_with(transport, bytes.fromhex("04 00 27 0c"), bytes.fromhex("04 00 1b 00 00 00 00"))
+
+    packets = ei.request_multiple(
+        "RetrieveCategorizedDatabaseRecords",
+        response="ReturnCategorizedDatabaseRecord",
+        idle_timeout=0.05,
+    )
+
+    assert len(packets) == 1
+    assert notified.wait(1)

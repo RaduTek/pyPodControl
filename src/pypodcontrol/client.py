@@ -40,6 +40,18 @@ class _Pending:
     future: Future = field(default_factory=Future)
 
 
+@dataclass(eq=False)
+class _Collector:
+    """A request gathering several response packets"""
+
+    lingo: Lingo
+    command_id: int
+    response_ids: frozenset[int]
+    transaction_id: int | None
+    packets: queue.SimpleQueue = field(default_factory=queue.SimpleQueue)
+    """Received packets, or the exception to raise in the waiting thread"""
+
+
 class iAPClient:
     """
     ### iAPClient
@@ -92,6 +104,7 @@ class iAPClient:
 
         self._lingos: dict[int, Lingo] = {}
         self._pending: list[_Pending] = []
+        self._collectors: list[_Collector] = []
         self._lock = threading.Lock()
 
         self._transaction_id = 0
@@ -236,6 +249,7 @@ class iAPClient:
 
         with self._lock:
             pending, self._pending = self._pending, []
+            collectors, self._collectors = self._collectors, []
 
         logger.info("Closed %s", type(self.transport).__name__)
         if pending:
@@ -243,6 +257,9 @@ class iAPClient:
 
         for p in pending:
             p.future.set_exception(iAPError("Client closed"))
+
+        for c in collectors:
+            c.packets.put(iAPError("Client closed"))
 
     def wait_until_closed(self, timeout: float | None = None) -> bool:
         """
@@ -403,7 +420,9 @@ class iAPClient:
         except iAPError:
             logger.exception("Identifying again failed")
 
-    def _next_transaction_id(self) -> int:
+    def next_transaction_id(self) -> int:
+        """Allocate the next transaction ID, e.g. to share one across the sections of a command"""
+
         with self._lock:
             transaction_id = self._transaction_id
             self._transaction_id = (self._transaction_id + 1) & 0xFFFF
@@ -420,7 +439,7 @@ class iAPClient:
             transaction_id = self._transaction_ids_enabled
 
         if transaction_id is True:
-            tid: int | None = self._next_transaction_id()
+            tid: int | None = self.next_transaction_id()
         elif transaction_id is False:
             tid = None
         else:
@@ -459,12 +478,16 @@ class iAPClient:
         data: bytes = b"",
         response_ids: frozenset[int] = frozenset(),
         timeout: float | None = None,
+        *,
+        transaction_id: bool | int | None = None,
     ) -> Packet:
         """
         Send a command and block until its response arrives
 
         - response_ids: Command IDs of the expected response, empty to wait for an ACK
         - timeout: Timeout in seconds, None for the default timeout
+        - transaction_id: Override whether a transaction ID is included
+          (True/False), or an explicit ID to send
 
         Returns the response packet (or the ACK packet)
         """
@@ -472,7 +495,7 @@ class iAPClient:
         if timeout is None:
             timeout = self.timeout
 
-        packet = self._build_packet(lingo, command_id, data, None)
+        packet = self._build_packet(lingo, command_id, data, transaction_id)
         pending = _Pending(
             lingo,
             command_id,
@@ -492,6 +515,105 @@ class iAPClient:
             with self._lock:
                 if pending in self._pending:
                     self._pending.remove(pending)
+
+    def request_multiple(
+        self,
+        lingo: Lingo,
+        command_id: int,
+        data: bytes = b"",
+        response_ids: frozenset[int] = frozenset(),
+        done: Callable[[list[Packet]], bool] | None = None,
+        timeout: float | None = None,
+        idle_timeout: float = 0.3,
+    ) -> list[Packet]:
+        """
+        Send a command and gather the response packets it produces
+
+        For commands the iPod answers with several packets (one per record,
+        or the sections of a large transfer). Gathering ends when done(packets)
+        returns True, the iPod sends a success ACK, or no packet arrives for
+        idle_timeout seconds after the first one.
+
+        - response_ids: Command IDs of the expected responses
+        - done: Called after each packet with all packets so far, None to
+          end on the ACK or the idle timeout only
+        - timeout: Timeout for the first packet, None for the default timeout
+        - idle_timeout: Maximum gap between packets, in seconds
+
+        Raises iAPAckError if the iPod responds with an error ACK, and
+        iAPTimeoutError if no packet is received in time.
+        """
+
+        if timeout is None:
+            timeout = self.timeout
+
+        packet = self._build_packet(lingo, command_id, data, None)
+        collector = _Collector(lingo, command_id, response_ids, packet.transaction_id)
+        name = f"{type(lingo).__name__}.{lingo.command_name(command_id)}"
+
+        # Register before sending, the responses may arrive before send returns
+        with self._lock:
+            self._collectors.append(collector)
+
+        try:
+            self._send(lingo, packet)
+
+            packets: list[Packet] = []
+            deadline = time.monotonic() + timeout
+
+            while True:
+                wait = idle_timeout if packets else deadline - time.monotonic()
+
+                try:
+                    item = collector.packets.get(timeout=max(wait, 0))
+                except queue.Empty:
+                    if packets:
+                        return packets
+                    # Deadline may have been extended by a command pending ACK
+                    if deadline > time.monotonic():
+                        continue
+
+                    logger.debug("No response to %s", name)
+                    raise iAPTimeoutError(f"No response to {name} in time") from None
+
+                if isinstance(item, Exception):
+                    raise item
+
+                ack = lingo.parse_ack(item)
+                if (
+                    ack is not None
+                    and ack[1] == command_id
+                    and item.command_id not in response_ids
+                ):
+                    status = ack[0]
+
+                    if status == lingo.ACK_PENDING:
+                        deadline = max(deadline, time.monotonic() + self._pending_wait(item))
+                        continue
+
+                    if status != lingo.ACK_SUCCESS:
+                        logger.debug("%s rejected: %s", name, ack_status_name(status))
+                        raise iAPAckError(status, name)
+
+                    return packets
+
+                packets.append(item)
+                if done is not None and done(packets):
+                    return packets
+        finally:
+            with self._lock:
+                if collector in self._collectors:
+                    self._collectors.remove(collector)
+
+    @staticmethod
+    def _pending_wait(ack: Packet) -> float:
+        """Maximum wait in seconds of a command pending ACK, 0 if it has none"""
+
+        # Command pending ACKs end with the maximum wait in ms
+        if len(ack.data) >= 6:
+            return int.from_bytes(ack.data[-4:], "big") / 1000.0
+
+        return 0.0
 
     def _wait(self, pending: _Pending) -> Packet:
         while True:
@@ -549,7 +671,7 @@ class iAPClient:
             logger.debug("Ignoring packet of unregistered lingo 0x%02X", packet.lingo_id)
             return
 
-        if self._resolve_pending(lingo, packet):
+        if self._resolve_pending(lingo, packet) or self._collect(lingo, packet):
             return
 
         lingo.handle_packet(packet)
@@ -581,9 +703,8 @@ class iAPClient:
                 status = ack[0]
 
                 if status == lingo.ACK_PENDING:
-                    # Command pending ACKs end with the maximum wait in ms
-                    if len(packet.data) >= 6:
-                        wait = int.from_bytes(packet.data[-4:], "big") / 1000.0
+                    wait = self._pending_wait(packet)
+                    if wait:
                         logger.debug(
                             "%s.%s pending, waiting up to %.1f s",
                             type(lingo).__name__,
@@ -614,5 +735,30 @@ class iAPClient:
                 if not pending.response_ids:
                     pending.future.set_result(packet)
                 return True
+
+        return False
+
+    def _collect(self, lingo: Lingo, packet: Packet) -> bool:
+        """Pass the packet to the request_multiple() gathering it, returns whether one matched"""
+
+        ack = lingo.parse_ack(packet)
+
+        with self._lock:
+            for collector in self._collectors:
+                if collector.lingo is not lingo:
+                    continue
+
+                if (
+                    collector.transaction_id is not None
+                    and packet.transaction_id is not None
+                    and collector.transaction_id != packet.transaction_id
+                ):
+                    continue
+
+                if packet.command_id in collector.response_ids or (
+                    ack is not None and ack[1] == collector.command_id
+                ):
+                    collector.packets.put(packet)
+                    return True
 
         return False

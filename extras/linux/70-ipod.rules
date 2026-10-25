@@ -1,0 +1,22 @@
+# pyPodControl: access to iPods, iPhones and iPads (Apple 05ac:12xx) over USB
+#
+# Install to /etc/udev/rules.d/, then reload with:
+#   sudo udevadm control --reload && sudo udevadm trigger
+#
+# uaccess grants access to the user logged in at the local seat (desktop).
+# Headless and SSH sessions (e.g. on a Raspberry Pi) have no seat, so access
+# is also granted to the plugdev group; add your user with:
+#   sudo usermod -aG plugdev $USER
+# Distributions without a plugdev group (e.g. Fedora) ignore GROUP, create
+# the group first for headless use: sudo groupadd plugdev
+
+# USB device node, used by hidapi's libusb backend and by pyusb
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="05ac", ATTR{idProduct}=="12??", MODE="0660", GROUP="plugdev", TAG+="uaccess"
+
+# hidraw node, used by hidapi's hidraw backend
+KERNEL=="hidraw*", SUBSYSTEM=="hidraw", ATTRS{idVendor}=="05ac", ATTRS{idProduct}=="12??", MODE="0660", GROUP="plugdev", TAG+="uaccess"
+
+# Without the ipod-iui kernel module: switch to the iPod USB Interface
+# configuration when connected. The kernel has already configured the iPod in
+# mass storage mode by then, which briefly stops playback. Uncomment to use:
+#ACTION=="add", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="05ac", ATTR{idProduct}=="12??", ATTR{bConfigurationValue}="2"

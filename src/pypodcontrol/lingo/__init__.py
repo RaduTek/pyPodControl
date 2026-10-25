@@ -1,7 +1,35 @@
 from .lingo import Lingo
 from .general import AccessoryInfo, General, PowerOption
 from .simpleremote import SimpleRemote
-from .extendedinterface import ExtendedInterface
+from .extendedinterface import (
+    Artwork,
+    ArtworkFormat,
+    AudiobookSpeed,
+    ChapterInfo,
+    ChapterPlayStatus,
+    DBCategory,
+    DBHierarchy,
+    DisplayImageLimits,
+    ExtendedInterface,
+    ExtendedPlayState,
+    IndexType,
+    PlaybackMode,
+    PlayControlCommand,
+    PlayerState,
+    PlayerStatus,
+    PlayingTrackInfoType,
+    PlayStatusChange,
+    PixelFormat,
+    PlayStatusEvent,
+    RepeatMode,
+    ShuffleMode,
+    SortOrder,
+    TrackCapability,
+    TrackCapsInfo,
+    TrackIdentifierType,
+    TrackInfoBit,
+    iTunesInfoType,
+)
 from .accessorypower import AccessoryPower
 from .microphone import Microphone
 from .displayremote import DisplayRemote, PlayState, PlayStatus, RemoteEvent, TrackInfoType, Volume

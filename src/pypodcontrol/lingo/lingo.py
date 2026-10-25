@@ -136,6 +136,8 @@ class Lingo:
         data: bytes = b"",
         response: str | int | Iterable[str | int] | None = None,
         timeout: float | None = None,
+        *,
+        transaction_id: bool | int | None = None,
     ) -> Packet:
         """
         Send a command and wait for the iPod's response
@@ -144,21 +146,65 @@ class Lingo:
         - data: Command parameters
         - response: Expected response command(s), or None to wait for an ACK
         - timeout: Timeout in seconds, None for the client's default
+        - transaction_id: Override whether a transaction ID is included
+          (True/False), or an explicit ID to send
 
         Raises iAPAckError if the iPod responds with an error ACK, and
         iAPTimeoutError if no response is received in time.
         """
 
-        if response is None:
-            response_ids = frozenset()
-        elif isinstance(response, (str, int)):
-            response_ids = frozenset([self.command_id(response)])
-        else:
-            response_ids = frozenset(self.command_id(r) for r in response)
-
         return self.iap.request(
-            self, self.command_id(command), data, response_ids, timeout
+            self,
+            self.command_id(command),
+            data,
+            self._response_ids(response),
+            timeout,
+            transaction_id=transaction_id,
         )
+
+    def request_multiple(
+        self,
+        command: str | int,
+        data: bytes = b"",
+        response: str | int | Iterable[str | int] | None = None,
+        done: Callable[[list[Packet]], bool] | None = None,
+        timeout: float | None = None,
+        idle_timeout: float = 0.3,
+    ) -> list[Packet]:
+        """
+        Send a command and gather the response packets it produces
+
+        - command: Command name or ID
+        - data: Command parameters
+        - response: Expected response command(s)
+        - done: Called after each packet with all packets so far, returns
+          whether all have been received; None to end on the iPod's ACK or
+          when no packet arrives for idle_timeout seconds
+        - timeout: Timeout for the first packet, None for the client's default
+        - idle_timeout: Maximum gap between packets, in seconds
+
+        Raises iAPAckError if the iPod responds with an error ACK, and
+        iAPTimeoutError if no response is received in time.
+        """
+
+        return self.iap.request_multiple(
+            self,
+            self.command_id(command),
+            data,
+            self._response_ids(response),
+            done,
+            timeout,
+            idle_timeout,
+        )
+
+    def _response_ids(
+        self, response: str | int | Iterable[str | int] | None
+    ) -> frozenset[int]:
+        if response is None:
+            return frozenset()
+        if isinstance(response, (str, int)):
+            return frozenset([self.command_id(response)])
+        return frozenset(self.command_id(r) for r in response)
 
     def parse_ack(self, packet: Packet) -> tuple[int, int] | None:
         """
