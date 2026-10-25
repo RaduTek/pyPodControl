@@ -2,7 +2,7 @@ from pathlib import Path
 
 from .base import AuthenticationProvider
 
-DEFAULT_CERTIFICATE_PATH = Path(__file__).with_name("apple_auth_cert.bin")
+DEFAULT_CERTIFICATE_PATH = Path(__file__).with_name("apple_auth_cert_2.bin")
 """Certificate shipped with the library, captured from a real authentication"""
 
 DEFAULT_DEVICE_ID = 0x200
