@@ -66,9 +66,10 @@ class SMBus2Bus(I2CBus):
         self._transfer(self._msg.write(address, list(data)))
 
     def write_read(self, address: int, data: bytes, length: int) -> bytes:
-        read = self._msg.read(address, length)
-        self._transfer(self._msg.write(address, list(data)), read)
-        return bytes(read)
+        # Separate transactions (stop in between, which the coprocessor spec
+        # allows) rather than a repeated start, which the chip may not accept
+        self._transfer(self._msg.write(address, list(data)))
+        return self.read(address, length)
 
     def read(self, address: int, length: int) -> bytes:
         read = self._msg.read(address, length)

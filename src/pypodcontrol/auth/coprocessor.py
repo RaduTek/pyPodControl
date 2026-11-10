@@ -106,9 +106,11 @@ class CoprocessorAuthenticationProvider(AuthenticationProvider):
         while True:
             try:
                 return operation()
-            except I2CNackError:
+            except I2CNackError as e:
                 if time.monotonic() >= deadline:
-                    raise CoprocessorError("Coprocessor stayed busy (I2C NACK)")
+                    raise CoprocessorError(
+                        f"Coprocessor stayed busy (I2C NACK: {e})"
+                    ) from e
                 time.sleep(NACK_RETRY_DELAY)
 
     def _read(self, register: int, length: int) -> bytes:
