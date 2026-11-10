@@ -33,6 +33,8 @@ class FakeCoprocessorBus(I2CBus):
         self.signature = b""
         self.polls = 0
         self.closed = False
+        self.pointer_writes = 0
+        self.read_nacks = 0
 
     def _check(self, address):
         if address != self.address:
@@ -69,6 +71,11 @@ class FakeCoprocessorBus(I2CBus):
     def write(self, address, data):
         self._check(address)
         reg, payload = data[0], data[1:]
+        if not payload:  # register pointer for a following read
+            self.pointer_writes += 1
+            self._buf = self._stream(reg)
+            self.pos = 0
+            return
         if reg == 0x20:
             n = int.from_bytes(payload[:2], "big")
             self.challenge = payload[2 : 2 + n]
@@ -92,6 +99,9 @@ class FakeCoprocessorBus(I2CBus):
     def read(self, address, length, _checked=False):
         if not _checked:
             self._check(address)
+            if self.read_nacks:
+                self.read_nacks -= 1
+                raise I2CNackError("busy after register write")
         chunk = self._buf[self.pos : self.pos + length]
         self.pos += length
         return chunk + b"\xff" * (length - len(chunk))
@@ -198,3 +208,11 @@ def test_authentication_handshake():
 
     assert bytes(ipod.certificate) == CERT
     assert ipod.signature == bus.signature
+
+
+def test_read_nack_retries_only_the_read():
+    bus = FakeCoprocessorBus()
+    bus.read_nacks = 5
+    assert CoprocessorAuthenticationProvider(bus).device_id == 0x200
+    # The register pointer is not rewritten on every NACKed read
+    assert bus.pointer_writes == 3  # version, protocol, device ID

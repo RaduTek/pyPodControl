@@ -114,9 +114,11 @@ class CoprocessorAuthenticationProvider(AuthenticationProvider):
                 time.sleep(NACK_RETRY_DELAY)
 
     def _read(self, register: int, length: int) -> bytes:
-        data = self._retry(
-            lambda: self._bus.write_read(self.address, bytes([register]), length)
-        )
+        # Set the register pointer, then read. A NACK on the read must only
+        # retry the read: repeating the pointer write restarts the chip's
+        # processing and it would never become ready.
+        self._retry(lambda: self._bus.write(self.address, bytes([register])))
+        data = self._retry(lambda: self._bus.read(self.address, length))
         if len(data) != length:
             raise CoprocessorError(f"Short read from register 0x{register:02X}")
         return data
