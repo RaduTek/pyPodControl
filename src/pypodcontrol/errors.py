@@ -14,6 +14,17 @@ class iAPIdentificationError(iAPError):
     """Identification with the iPod failed"""
 
 
+class CoprocessorError(iAPError):
+    """The authentication coprocessor failed or reported an error"""
+
+    code: int | None
+    """Coprocessor error code, if one was reported"""
+
+    def __init__(self, message: str, code: int | None = None) -> None:
+        super().__init__(message)
+        self.code = code
+
+
 class AudioError(iAPError):
     """Routing the iPod's digital audio failed (missing backend, no source, ...)"""
 

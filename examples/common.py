@@ -23,6 +23,19 @@ def add_transport_args(parser: argparse.ArgumentParser) -> None:
         help="Skip authentication (identify only; use for a stock iPod)",
     )
     group.add_argument(
+        "--i2c-bus",
+        type=int,
+        default=None,
+        help="Authenticate with an Apple coprocessor on this I2C bus number "
+        "(default: bypass provider)",
+    )
+    group.add_argument(
+        "--i2c-address",
+        type=lambda v: int(v, 0),
+        default=0x10,
+        help="Coprocessor 7-bit I2C address, 0x10 or 0x11 (default: 0x10)",
+    )
+    group.add_argument(
         "--port", default="/dev/ttyUSB0", help="UART serial port (default: %(default)s)"
     )
     group.add_argument(
@@ -70,6 +83,12 @@ def make_auth(args: argparse.Namespace) -> AuthenticationProvider | None:
 
     if not args.auth:
         return None
+
+    if args.i2c_bus is not None:
+        from pypodcontrol.auth import CoprocessorAuthenticationProvider
+
+        logger.info("Authenticating with the I2C coprocessor")
+        return CoprocessorAuthenticationProvider(args.i2c_bus, args.i2c_address)
 
     logger.info("Authenticating with the bypass provider (needs a patched iPod)")
     return BypassedAuthenticationProvider()

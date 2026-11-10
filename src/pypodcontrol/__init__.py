@@ -1,5 +1,6 @@
 from .errors import (
     AudioError,
+    CoprocessorError,
     TransportError,
     iAPAckError,
     iAPError,
