@@ -126,6 +126,18 @@ The iPod still performs a genuine certificate check, so a real Apple X.509 certi
 
 The examples authenticate this way by default; pass `--no-auth` to identify without authenticating (for a stock iPod).
 
+#### Apple authentication coprocessor (I2C)
+
+A stock iPod needs a real signature from an iPod Authentication Coprocessor 2.0C. Connect it to an I2C bus (Linux i2c-dev, e.g. Raspberry Pi) and install `pip install pypodcontrol[i2c]`:
+
+```python
+from pypodcontrol.auth import CoprocessorAuthenticationProvider
+
+auth = CoprocessorAuthenticationProvider(1)  # I2C bus 1, address 0x10
+```
+
+The address is 0x10 when the chip's RST pin is low at power-up and 0x11 when high (pass `address=0x11`). The bus needs pull-ups, runs at up to 400 kHz, and the chip may NACK while busy; this is retried automatically. Wait at least 10 ms after powering the chip before authenticating. Pass any `I2CBus` implementation instead of a bus number to use another I2C adapter. Examples take `--i2c-bus N [--i2c-address 0x11]`.
+
 ### Transports
 
 -   `UARTTransport(port, baudrate=19200)`: serial UART on the 30 pin connector
